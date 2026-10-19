@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-from datetime import date
-import plotly.express as px
+from datetime import datetime, date, timedelta
+import calendar
 
 # Configuração da página
 st.set_page_config(
@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização CSS personalizada (Cores Vinho e Laranja da Chammas)
+# Estilização CSS personalizada (Cores Vinho e Laranja da Chammas + Tabela estilo Planilha)
 st.markdown("""
 <style>
     :root {
@@ -44,6 +44,71 @@ st.markdown("""
     .stButton>button:hover {
         background-color: #BF360C;
         color: white;
+    }
+
+    /* Estilização da Tabela de Matriz Diária */
+    .gantt-matrix-container {
+        overflow-x: auto;
+        background-color: white;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #ddd;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
+    .gantt-table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 12px;
+        font-family: Arial, sans-serif;
+    }
+
+    .gantt-table th, .gantt-table td {
+        border: 1px solid #ccc;
+        text-align: center;
+        padding: 4px 2px;
+        white-space: nowrap;
+    }
+
+    .gantt-table th.header-month {
+        background-color: #f2d7d5;
+        color: #5C061C;
+        font-weight: bold;
+        font-size: 14px;
+        text-transform: uppercase;
+    }
+
+    .gantt-table th.header-day {
+        background-color: #f8f9fa;
+        color: #333;
+        font-weight: bold;
+        min-width: 25px;
+    }
+
+    .gantt-table td.col-info {
+        text-align: left;
+        padding-left: 8px;
+        padding-right: 8px;
+        font-weight: bold;
+        background-color: #fafafa;
+    }
+
+    .cell-allocated {
+        background-color: #5C061C !important;
+        color: white !important;
+        font-weight: bold;
+    }
+
+    .cell-substitution {
+        background-color: #E65100 !important;
+        color: white !important;
+        font-weight: bold;
+    }
+
+    .cell-vacation {
+        background-color: #d9534f !important;
+        color: white !important;
+        font-weight: bold;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -108,131 +173,3 @@ def init_db():
         c.executemany("INSERT INTO veiculos (placa) VALUES (?)", [(v,) for v in veiculos_iniciais])
 
     c.execute("SELECT COUNT(*) FROM etilometros")
-    if c.fetchone()[0] == 0:
-        etilometros_iniciais = ['18302', '18303', '18304', '18305', '18306', '18307', '19407', '19408']
-        c.executemany("INSERT INTO etilometros (codigo) VALUES (?)", [(e,) for e in etilometros_iniciais])
-
-    c.execute("SELECT COUNT(*) FROM projetos")
-    if c.fetchone()[0] == 0:
-        projetos_iniciais = [
-            'Gerdau - 5955', 'Vale Brucutu - 5930', 'Gerdau - 5919', 'Vale Norte - 5426', 
-            'St. George - 6874', 'Jaguar - 6132', 'Vale - 6300', 'Vale Itabira - 5907', 
-            'Kinross - 5852', 'Vale Água Limpa - 5930', 'CBMM - 6150', 'Gerdau - 6677'
-        ]
-        c.executemany("INSERT INTO projetos (nome) VALUES (?)", [(p,) for p in projetos_iniciais])
-
-    conn.commit()
-    conn.close()
-
-init_db()
-
-def run_query(query):
-    conn = sqlite3.connect('chammas_gestao.db')
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
-
-def execute_db(query, params=()):
-    conn = sqlite3.connect('chammas_gestao.db')
-    c = conn.cursor()
-    c.execute(query, params)
-    conn.commit()
-    conn.close()
-
-# Cabeçalho
-st.markdown("""
-<div class="main-header">
-    <h1 style="margin:0;">CHAMMAS ENGENHARIA</h1>
-    <p style="margin:0; opacity: 0.9;">Informação Geotécnica & Segurança Operacional | Painel Sistêmico de Alocação</p>
-</div>
-""", unsafe_allow_html=True)
-
-df_tsts = run_query("SELECT nome FROM tsts")['nome'].tolist()
-df_veiculos = run_query("SELECT placa FROM veiculos")['placa'].tolist()
-df_etilometros = run_query("SELECT codigo FROM etilometros")['codigo'].tolist()
-df_projetos = run_query("SELECT nome FROM projetos")['nome'].tolist()
-
-df_alocacoes = run_query("SELECT * FROM alocacoes")
-df_ferias = run_query("SELECT * FROM ferias")
-
-# Indicadores em Cards
-col1, col2, col3, col4, col5 = st.columns(5)
-
-total_tsts = len(df_tsts)
-tsts_alocados = df_alocacoes['tst'].nunique() if not df_alocacoes.empty else 0
-tsts_ferias = df_ferias['tst'].nunique() if not df_ferias.empty else 0
-tsts_livres = max(0, total_tsts - (tsts_alocados + tsts_ferias))
-tsts_com_veiculo = df_alocacoes[df_alocacoes['veiculo'].notnull() & (df_alocacoes['veiculo'] != '') & (df_alocacoes['veiculo'] != 'Nenhum')]['tst'].nunique() if not df_alocacoes.empty else 0
-
-with col1:
-    st.metric("Total TSTs", total_tsts)
-with col2:
-    st.metric("Alocados em Projetos", tsts_alocados)
-with col3:
-    st.metric("Em Férias", tsts_ferias)
-with col4:
-    st.metric("Sem Alocação", tsts_livres)
-with col5:
-    st.metric("Com Veículo", tsts_com_veiculo)
-
-st.markdown("---")
-
-menu = st.tabs(["📊 Visão Sistêmica (Gantt)", "➕ Nova Alocação", "🌴 Gestão de Férias", "📥 Exportar para Power BI"])
-
-# TAB 1: VISÃO GANTT VISUAL
-with menu[0]:
-    st.subheader("Gráfico de Gantt: Alocação por Projeto")
-    if not df_alocacoes.empty:
-        df_alocacoes['data_inicio'] = pd.to_datetime(df_alocacoes['data_inicio'])
-        df_alocacoes['data_fim'] = pd.to_datetime(df_alocacoes['data_fim'])
-        df_alocacoes['Tipo'] = df_alocacoes['is_substituicao'].apply(lambda x: 'Substituição de Férias' if x == 1 else 'Titular')
-        
-        fig_gantt = px.timeline(
-            df_alocacoes,
-            x_start="data_inicio",
-            x_end="data_fim",
-            y="projeto",
-            color="Tipo",
-            hover_data=["tst", "veiculo", "etilometro", "observacao"],
-            color_discrete_map={'Titular': '#5C061C', 'Substituição de Férias': '#E65100'},
-            title="Linha do Tempo de Projetos e Alocações"
-        )
-        fig_gantt.update_yaxes(autorange="reversed")
-        
-        # Ajuste do eixo X para cabeçalho no topo e formato dd/mm/yyyy diário
-        fig_gantt.update_xaxes(
-            side="top",
-            dtick="D1",
-            tickformat="%d/%m/%Y",
-            tickangle=-45
-        )
-        
-        fig_gantt.update_layout(height=450, margin=dict(l=0, r=0, t=60, b=10))
-        st.plotly_chart(fig_gantt, use_container_width=True)
-
-        st.markdown("### Tabela Detalhada de Alocações")
-        st.dataframe(
-            df_alocacoes[['projeto', 'tst', 'veiculo', 'etilometro', 'data_inicio', 'data_fim', 'Tipo', 'observacao']],
-            use_container_width=True
-        )
-    else:
-        st.info("Nenhuma alocação registrada até o momento. Cadastre novas alocações na aba 'Nova Alocação'.")
-
-    st.markdown("---")
-    st.subheader("Cronograma de Férias da Equipe")
-    if not df_ferias.empty:
-        df_ferias['data_inicio'] = pd.to_datetime(df_ferias['data_inicio'])
-        df_ferias['data_fim'] = pd.to_datetime(df_ferias['data_fim'])
-
-        fig_ferias = px.timeline(
-            df_ferias,
-            x_start="data_inicio",
-            x_end="data_fim",
-            y="tst",
-            hover_data=["substituto"],
-            color_discrete_sequence=['#E65100'],
-            title="Escala de Férias dos TSTs"
-        )
-        fig_ferias.update_yaxes(autorange="reversed")
-        
-        # Ajuste do eixo X no topo e formato dd
