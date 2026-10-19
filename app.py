@@ -108,4 +108,14 @@ def init_db():
         c.executemany("INSERT INTO veiculos (placa) VALUES (?)", [(v,) for v in veiculos_iniciais])
 
     c.execute("SELECT COUNT(*) FROM etilometros")
-    if c.
+    if c.fetchone()[0] == 0:
+        etilometros_iniciais = ['18302', '18303', '18304', '18305', '18306', '18307', '19407', '19408']
+        c.executemany("INSERT INTO etilometros (codigo) VALUES (?)", [(e,) for e in etilometros_iniciais])
+
+    c.execute("SELECT COUNT(*) FROM projetos")
+    if c.fetchone()[0] == 0:
+        projetos_iniciais = [
+            'Gerdau - 5955', 'Vale Brucutu - 5930', 'Gerdau - 5919', 'Vale Norte - 5426', 
+            'St. George - 6874', 'Jaguar - 6132', 'Vale - 6300', 'Vale Itabira - 5907', 
+            'Kinross - 5852', 'Vale Água Limpa - 5930', 'CBMM - 6150', 'Gerdau - 6677'
+        ]
