@@ -198,7 +198,16 @@ with menu[0]:
             title="Linha do Tempo de Projetos e Alocações"
         )
         fig_gantt.update_yaxes(autorange="reversed")
-        fig_gantt.update_layout(height=400, margin=dict(l=0, r=0, t=40, b=0))
+        
+        # Ajuste do eixo X para cabeçalho no topo e formato dd/mm/yyyy diário
+        fig_gantt.update_xaxes(
+            side="top",
+            dtick="D1",
+            tickformat="%d/%m/%Y",
+            tickangle=-45
+        )
+        
+        fig_gantt.update_layout(height=450, margin=dict(l=0, r=0, t=60, b=10))
         st.plotly_chart(fig_gantt, use_container_width=True)
 
         st.markdown("### Tabela Detalhada de Alocações")
@@ -225,74 +234,5 @@ with menu[0]:
             title="Escala de Férias dos TSTs"
         )
         fig_ferias.update_yaxes(autorange="reversed")
-        fig_ferias.update_layout(height=350, margin=dict(l=0, r=0, t=40, b=0))
-        st.plotly_chart(fig_ferias, use_container_width=True)
-
-        st.dataframe(
-            df_ferias[['tst', 'substituto', 'data_inicio', 'data_fim']],
-            use_container_width=True
-        )
-    else:
-        st.info("Nenhum período de férias registrado.")
-
-# TAB 2: NOVA ALOCAÇÃO
-with menu[1]:
-    st.subheader("Registrar Alocação Diária / Projeto")
-    with st.form("form_alocacao"):
-        projeto_sel = st.selectbox("Projeto (Cliente - Código)", df_projetos)
-        tst_sel = st.selectbox("Técnico de Segurança (TST)", df_tsts)
-        veiculo_sel = st.selectbox("Veículo Alocado", ["Nenhum"] + df_veiculos)
-        etilometro_sel = st.selectbox("Etilômetro", ["Nenhum"] + df_etilometros)
         
-        c_dt1, c_dt2 = st.columns(2)
-        dt_inicio = c_dt1.date_input("Data Inicial", date.today())
-        dt_fim = c_dt2.date_input("Data Final", date.today())
-        
-        is_sub = st.checkbox("Esta alocação é uma substituição de férias?")
-        obs = st.text_input("Observações")
-        
-        btn_alocar = st.form_submit_button("Salvar Alocação")
-        
-        if btn_alocar:
-            execute_db(
-                "INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao) VALUES (?,?,?,?,?,?,?,?)",
-                (projeto_sel, tst_sel, veiculo_sel, etilometro_sel, str(dt_inicio), str(dt_fim), 1 if is_sub else 0, obs)
-            )
-            st.success("Alocação registrada com sucesso!")
-            st.rerun()
-
-# TAB 3: GESTÃO DE FÉRIAS
-with menu[2]:
-    st.subheader("Lançar Férias de TST")
-    with st.form("form_ferias"):
-        tst_ferias = st.selectbox("TST em Férias", df_tsts)
-        tst_sub = st.selectbox("TST Substituto Designado", ["Nenhum"] + df_tsts)
-        
-        c_f1, c_f2 = st.columns(2)
-        f_inicio = c_f1.date_input("Início das Férias", date.today())
-        f_fim = c_f2.date_input("Fim das Férias", date.today())
-        
-        btn_ferias = st.form_submit_button("Registrar Férias")
-        if btn_ferias:
-            execute_db(
-                "INSERT INTO ferias (tst, substituto, data_inicio, data_fim) VALUES (?,?,?,?)",
-                (tst_ferias, tst_sub, str(f_inicio), str(f_fim))
-            )
-            st.success("Férias registradas com sucesso!")
-            st.rerun()
-
-# TAB 4: POWER BI
-with menu[3]:
-    st.subheader("Exportação de Dados para Power BI")
-    st.write("Baixe o arquivo CSV da tabela fato para conectar no seu relatório do Power BI.")
-    
-    if not df_alocacoes.empty:
-        csv = df_alocacoes.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Baixar fato_alocacoes.csv",
-            data=csv,
-            file_name="fato_alocacoes_chammas.csv",
-            mime="text/csv"
-        )
-    else:
-        st.warning("Sem dados de alocação para exportar.")
+        # Ajuste do eixo X no topo e formato dd
