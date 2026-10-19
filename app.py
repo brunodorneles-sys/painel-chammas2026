@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização CSS personalizada (Cores Vinho e Laranja da Chammas)
+# Estilização CSS personalizada (Cores Vinho e Laranja da Chammas + Tabela estilo Planilha)
 st.markdown("""
 <style>
     :root {
@@ -185,4 +185,201 @@ def init_db():
             'St. George - 6874', 'Jaguar - 6132', 'Vale - 6300', 'Vale Itabira - 5907', 
             'Kinross - 5852', 'Vale Água Limpa - 5930', 'CBMM - 6150', 'Gerdau - 6677'
         ]
-        c.executemany("INSERT INTO projetos (nome
+        c.executemany("INSERT INTO projetos (nome) VALUES (?)", [(p,) for p in projetos_iniciais])
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def run_query(query):
+    conn = sqlite3.connect('chammas_gestao.db')
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
+
+def execute_db(query, params=()):
+    conn = sqlite3.connect('chammas_gestao.db')
+    c = conn.cursor()
+    c.execute(query, params)
+    conn.commit()
+    conn.close()
+
+# Cabeçalho
+st.markdown("""
+<div class="main-header">
+    <h1 style="margin:0;">CHAMMAS ENGENHARIA</h1>
+    <p style="margin:0; opacity: 0.9;">Informação Geotécnica & Segurança Operacional | Painel Sistêmico de Alocação</p>
+</div>
+""", unsafe_allow_html=True)
+
+df_tsts = run_query("SELECT nome FROM tsts")['nome'].tolist()
+df_veiculos = run_query("SELECT placa FROM veiculos")['placa'].tolist()
+df_etilometros = run_query("SELECT codigo FROM etilometros")['codigo'].tolist()
+df_projetos = run_query("SELECT nome FROM projetos")['nome'].tolist()
+
+df_alocacoes = run_query("SELECT * FROM alocacoes")
+df_ferias = run_query("SELECT * FROM ferias")
+
+# Indicadores em Cards
+col1, col2, col3, col4, col5 = st.columns(5)
+
+total_tsts = len(df_tsts)
+tsts_alocados = df_alocacoes['tst'].nunique() if not df_alocacoes.empty else 0
+tsts_ferias = df_ferias['tst'].nunique() if not df_ferias.empty else 0
+tsts_livres = max(0, total_tsts - (tsts_alocados + tsts_ferias))
+tsts_com_veiculo = df_alocacoes[df_alocacoes['veiculo'].notnull() & (df_alocacoes['veiculo'] != '') & (df_alocacoes['veiculo'] != 'Nenhum')]['tst'].nunique() if not df_alocacoes.empty else 0
+
+with col1:
+    st.metric("Total TSTs", total_tsts)
+with col2:
+    st.metric("Alocados em Projetos", tsts_alocados)
+with col3:
+    st.metric("Em Férias", tsts_ferias)
+with col4:
+    st.metric("Sem Alocação", tsts_livres)
+with col5:
+    st.metric("Com Veículo", tsts_com_veiculo)
+
+st.markdown("---")
+
+menu = st.tabs(["📊 Visão Sistêmica (Matriz)", "➕ Nova Alocação", "🌴 Gestão de Férias", "📥 Exportar para Power BI"])
+
+# TAB 1: MATRIZ DIÁRIA ESTILO PLANILHA
+with menu[0]:
+    st.subheader("Matriz Diária de Alocação (Escala de Campo)")
+    
+    col_m, col_a = st.columns(2)
+    meses_nomes = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO']
+    mes_sel_nome = col_m.selectbox("Selecione o Mês para Visualização", meses_nomes, index=datetime.now().month - 1)
+    ano_sel = col_a.number_input("Ano", min_value=2024, max_value=2030, value=datetime.now().year)
+    
+    mes_num = meses_nomes.index(mes_sel_nome) + 1
+    num_dias = calendar.monthrange(ano_sel, mes_num)[1]
+    
+    # Construção da Tabela HTML
+    html_lines = []
+    html_lines.append('<div class="gantt-matrix-container"><table class="gantt-table">')
+    
+    # Cabeçalho: Mês e Dias
+    html_lines.append(f'<thead><tr><th rowspan="2">Nº</th><th rowspan="2">Colaborador (TST)</th><th rowspan="2">Unidade / Projeto</th><th colspan="{num_dias}" class="header-month">{mes_sel_nome} {ano_sel}</th></tr><tr>')
+    for dia in range(1, num_dias + 1):
+        html_lines.append(f'<th class="header-day">{dia}</th>')
+    html_lines.append('</tr></thead><tbody>')
+    
+    # Linhas dos TSTs
+    for idx, tst_nome in enumerate(df_tsts, start=1):
+        aloc_tst = df_alocacoes[df_alocacoes['tst'] == tst_nome] if not df_alocacoes.empty else pd.DataFrame()
+        unidade_nome = aloc_tst['projeto'].iloc[-1] if not aloc_tst.empty else "-"
+        
+        html_lines.append(f'<tr><td>{idx}</td><td class="col-info">{tst_nome}</td><td class="col-info">{unidade_nome}</td>')
+        
+        for dia in range(1, num_dias + 1):
+            data_atual_str = f"{ano_sel:04d}-{mes_num:02d}-{dia:02d}"
+            
+            cell_class = ""
+            cell_text = ""
+            
+            # Férias
+            if not df_ferias.empty:
+                ferias_ativa = df_ferias[(df_ferias['tst'] == tst_nome) & (df_ferias['data_inicio'] <= data_atual_str) & (df_ferias['data_fim'] >= data_atual_str)]
+                if not ferias_ativa.empty:
+                    cell_class = "cell-vacation"
+                    cell_text = "F"
+            
+            # Alocações
+            if not cell_class and not df_alocacoes.empty:
+                aloc_ativa = df_alocacoes[(df_alocacoes['tst'] == tst_nome) & (df_alocacoes['data_inicio'] <= data_atual_str) & (df_alocacoes['data_fim'] >= data_atual_str)]
+                if not aloc_ativa.empty:
+                    is_sub = aloc_ativa['is_substituicao'].iloc[0]
+                    if is_sub == 1:
+                        cell_class = "cell-substitution"
+                        cell_text = "S"
+                    else:
+                        cell_class = "cell-allocated"
+                        cell_text = "X"
+            
+            html_lines.append(f'<td class="{cell_class}">{cell_text}</td>')
+            
+        html_lines.append('</tr>')
+        
+    html_lines.append('</tbody></table></div>')
+    
+    st.markdown("".join(html_lines), unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div style="margin-top: 10px; margin-bottom: 25px; display: flex; gap: 20px; font-size: 13px;">
+        <div><span style="background-color: #5C061C; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">X</span> Titular Alocado</div>
+        <div><span style="background-color: #E65100; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">S</span> Substituição de Férias</div>
+        <div><span style="background-color: #d9534f; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">F</span> Em Férias</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("### 📋 Registros de Alocações Cadastrados")
+    if not df_alocacoes.empty:
+        st.dataframe(df_alocacoes[['projeto', 'tst', 'veiculo', 'etilometro', 'data_inicio', 'data_fim', 'is_substituicao', 'observacao']], use_container_width=True)
+    else:
+        st.info("Nenhuma alocação registrada no banco de dados.")
+
+# TAB 2: NOVA ALOCAÇÃO
+with menu[1]:
+    st.subheader("Registrar Alocação Diária / Projeto")
+    with st.form("form_alocacao"):
+        projeto_sel = st.selectbox("Projeto (Cliente - Código)", df_projetos)
+        tst_sel = st.selectbox("Técnico de Segurança (TST)", df_tsts)
+        veiculo_sel = st.selectbox("Veículo Alocado", ["Nenhum"] + df_veiculos)
+        etilometro_sel = st.selectbox("Etilômetro", ["Nenhum"] + df_etilometros)
+        
+        c_dt1, c_dt2 = st.columns(2)
+        dt_inicio = c_dt1.date_input("Data Inicial", date.today())
+        dt_fim = c_dt2.date_input("Data Final", date.today())
+        
+        is_sub = st.checkbox("Esta alocação é uma substituição de férias?")
+        obs = st.text_input("Observações")
+        
+        btn_alocar = st.form_submit_button("Salvar Alocação")
+        
+        if btn_alocar:
+            execute_db(
+                "INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao) VALUES (?,?,?,?,?,?,?,?)",
+                (projeto_sel, tst_sel, veiculo_sel, etilometro_sel, str(dt_inicio), str(dt_fim), 1 if is_sub else 0, obs)
+            )
+            st.success("Alocação registrada com sucesso!")
+            st.rerun()
+
+# TAB 3: GESTÃO DE FÉRIAS
+with menu[2]:
+    st.subheader("Lançar Férias de TST")
+    with st.form("form_ferias"):
+        tst_ferias = st.selectbox("TST em Férias", df_tsts)
+        tst_sub = st.selectbox("TST Substituto Designado", ["Nenhum"] + df_tsts)
+        
+        c_f1, c_f2 = st.columns(2)
+        f_inicio = c_f1.date_input("Início das Férias", date.today())
+        f_fim = c_f2.date_input("Fim das Férias", date.today())
+        
+        btn_ferias = st.form_submit_button("Registrar Férias")
+        if btn_ferias:
+            execute_db(
+                "INSERT INTO ferias (tst, substituto, data_inicio, data_fim) VALUES (?,?,?,?)",
+                (tst_ferias, tst_sub, str(f_inicio), str(f_fim))
+            )
+            st.success("Férias registradas com sucesso!")
+            st.rerun()
+
+# TAB 4: POWER BI
+with menu[3]:
+    st.subheader("Exportação de Dados para Power BI")
+    st.write("Baixe o arquivo CSV da tabela fato para conectar no seu relatório do Power BI.")
+    
+    if not df_alocacoes.empty:
+        csv = df_alocacoes.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Baixar fato_alocacoes.csv",
+            data=csv,
+            file_name="fato_alocacoes_chammas.csv",
+            mime="text/csv"
+        )
+    else:
+        st.warning("Sem dados de alocação para exportar.")
