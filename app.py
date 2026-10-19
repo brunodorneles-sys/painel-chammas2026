@@ -119,3 +119,180 @@ def init_db():
             'St. George - 6874', 'Jaguar - 6132', 'Vale - 6300', 'Vale Itabira - 5907', 
             'Kinross - 5852', 'Vale Água Limpa - 5930', 'CBMM - 6150', 'Gerdau - 6677'
         ]
+        c.executemany("INSERT INTO projetos (nome) VALUES (?)", [(p,) for p in projetos_iniciais])
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+def run_query(query):
+    conn = sqlite3.connect('chammas_gestao.db')
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
+
+def execute_db(query, params=()):
+    conn = sqlite3.connect('chammas_gestao.db')
+    c = conn.cursor()
+    c.execute(query, params)
+    conn.commit()
+    conn.close()
+
+# Cabeçalho
+st.markdown("""
+<div class="main-header">
+    <h1 style="margin:0;">CHAMMAS ENGENHARIA</h1>
+    <p style="margin:0; opacity: 0.9;">Informação Geotécnica & Segurança Operacional | Painel Sistêmico de Alocação</p>
+</div>
+""", unsafe_allow_html=True)
+
+df_tsts = run_query("SELECT nome FROM tsts")['nome'].tolist()
+df_veiculos = run_query("SELECT placa FROM veiculos")['placa'].tolist()
+df_etilometros = run_query("SELECT codigo FROM etilometros")['codigo'].tolist()
+df_projetos = run_query("SELECT nome FROM projetos")['nome'].tolist()
+
+df_alocacoes = run_query("SELECT * FROM alocacoes")
+df_ferias = run_query("SELECT * FROM ferias")
+
+# Indicadores em Cards
+col1, col2, col3, col4, col5 = st.columns(5)
+
+total_tsts = len(df_tsts)
+tsts_alocados = df_alocacoes['tst'].nunique() if not df_alocacoes.empty else 0
+tsts_ferias = df_ferias['tst'].nunique() if not df_ferias.empty else 0
+tsts_livres = max(0, total_tsts - (tsts_alocados + tsts_ferias))
+tsts_com_veiculo = df_alocacoes[df_alocacoes['veiculo'].notnull() & (df_alocacoes['veiculo'] != '') & (df_alocacoes['veiculo'] != 'Nenhum')]['tst'].nunique() if not df_alocacoes.empty else 0
+
+with col1:
+    st.metric("Total TSTs", total_tsts)
+with col2:
+    st.metric("Alocados em Projetos", tsts_alocados)
+with col3:
+    st.metric("Em Férias", tsts_ferias)
+with col4:
+    st.metric("Sem Alocação", tsts_livres)
+with col5:
+    st.metric("Com Veículo", tsts_com_veiculo)
+
+st.markdown("---")
+
+menu = st.tabs(["📊 Visão Sistêmica (Gantt)", "➕ Nova Alocação", "🌴 Gestão de Férias", "📥 Exportar para Power BI"])
+
+# TAB 1: VISÃO GANTT VISUAL
+with menu[0]:
+    st.subheader("Gráfico de Gantt: Alocação por Projeto")
+    if not df_alocacoes.empty:
+        df_alocacoes['data_inicio'] = pd.to_datetime(df_alocacoes['data_inicio'])
+        df_alocacoes['data_fim'] = pd.to_datetime(df_alocacoes['data_fim'])
+        df_alocacoes['Tipo'] = df_alocacoes['is_substituicao'].apply(lambda x: 'Substituição de Férias' if x == 1 else 'Titular')
+        
+        fig_gantt = px.timeline(
+            df_alocacoes,
+            x_start="data_inicio",
+            x_end="data_fim",
+            y="projeto",
+            color="Tipo",
+            hover_data=["tst", "veiculo", "etilometro", "observacao"],
+            color_discrete_map={'Titular': '#5C061C', 'Substituição de Férias': '#E65100'},
+            title="Linha do Tempo de Projetos e Alocações"
+        )
+        fig_gantt.update_yaxes(autorange="reversed")
+        fig_gantt.update_layout(height=400, margin=dict(l=0, r=0, t=40, b=0))
+        st.plotly_chart(fig_gantt, use_container_width=True)
+
+        st.markdown("### Tabela Detalhada de Alocações")
+        st.dataframe(
+            df_alocacoes[['projeto', 'tst', 'veiculo', 'etilometro', 'data_inicio', 'data_fim', 'Tipo', 'observacao']],
+            use_container_width=True
+        )
+    else:
+        st.info("Nenhuma alocação registrada até o momento. Cadastre novas alocações na aba 'Nova Alocação'.")
+
+    st.markdown("---")
+    st.subheader("Cronograma de Férias da Equipe")
+    if not df_ferias.empty:
+        df_ferias['data_inicio'] = pd.to_datetime(df_ferias['data_inicio'])
+        df_ferias['data_fim'] = pd.to_datetime(df_ferias['data_fim'])
+
+        fig_ferias = px.timeline(
+            df_ferias,
+            x_start="data_inicio",
+            x_end="data_fim",
+            y="tst",
+            hover_data=["substituto"],
+            color_discrete_sequence=['#E65100'],
+            title="Escala de Férias dos TSTs"
+        )
+        fig_ferias.update_yaxes(autorange="reversed")
+        fig_ferias.update_layout(height=350, margin=dict(l=0, r=0, t=40, b=0))
+        st.plotly_chart(fig_ferias, use_container_width=True)
+
+        st.dataframe(
+            df_ferias[['tst', 'substituto', 'data_inicio', 'data_fim']],
+            use_container_width=True
+        )
+    else:
+        st.info("Nenhum período de férias registrado.")
+
+# TAB 2: NOVA ALOCAÇÃO
+with menu[1]:
+    st.subheader("Registrar Alocação Diária / Projeto")
+    with st.form("form_alocacao"):
+        projeto_sel = st.selectbox("Projeto (Cliente - Código)", df_projetos)
+        tst_sel = st.selectbox("Técnico de Segurança (TST)", df_tsts)
+        veiculo_sel = st.selectbox("Veículo Alocado", ["Nenhum"] + df_veiculos)
+        etilometro_sel = st.selectbox("Etilômetro", ["Nenhum"] + df_etilometros)
+        
+        c_dt1, c_dt2 = st.columns(2)
+        dt_inicio = c_dt1.date_input("Data Inicial", date.today())
+        dt_fim = c_dt2.date_input("Data Final", date.today())
+        
+        is_sub = st.checkbox("Esta alocação é uma substituição de férias?")
+        obs = st.text_input("Observações")
+        
+        btn_alocar = st.form_submit_button("Salvar Alocação")
+        
+        if btn_alocar:
+            execute_db(
+                "INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao) VALUES (?,?,?,?,?,?,?,?)",
+                (projeto_sel, tst_sel, veiculo_sel, etilometro_sel, str(dt_inicio), str(dt_fim), 1 if is_sub else 0, obs)
+            )
+            st.success("Alocação registrada com sucesso!")
+            st.rerun()
+
+# TAB 3: GESTÃO DE FÉRIAS
+with menu[2]:
+    st.subheader("Lançar Férias de TST")
+    with st.form("form_ferias"):
+        tst_ferias = st.selectbox("TST em Férias", df_tsts)
+        tst_sub = st.selectbox("TST Substituto Designado", ["Nenhum"] + df_tsts)
+        
+        c_f1, c_f2 = st.columns(2)
+        f_inicio = c_f1.date_input("Início das Férias", date.today())
+        f_fim = c_f2.date_input("Fim das Férias", date.today())
+        
+        btn_ferias = st.form_submit_button("Registrar Férias")
+        if btn_ferias:
+            execute_db(
+                "INSERT INTO ferias (tst, substituto, data_inicio, data_fim) VALUES (?,?,?,?)",
+                (tst_ferias, tst_sub, str(f_inicio), str(f_fim))
+            )
+            st.success("Férias registradas com sucesso!")
+            st.rerun()
+
+# TAB 4: POWER BI
+with menu[3]:
+    st.subheader("Exportação de Dados para Power BI")
+    st.write("Baixe o arquivo CSV da tabela fato para conectar no seu relatório do Power BI.")
+    
+    if not df_alocacoes.empty:
+        csv = df_alocacoes.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Baixar fato_alocacoes.csv",
+            data=csv,
+            file_name="fato_alocacoes_chammas.csv",
+            mime="text/csv"
+        )
+    else:
+        st.warning("Sem dados de alocação para exportar.")
