@@ -5,7 +5,7 @@ from datetime import date
 
 # Configuração da página
 st.set_page_config(
-    page_title="Chammas Engenharia - Gestão de Alocação e SSMA",
+    page_title="Chammas Engenharia - Gestão de Recursos de SSMA",
     page_icon="🏗️",
     layout="wide"
 )
@@ -164,15 +164,15 @@ tsts_livres = max(0, total_tsts - (tsts_alocados + tsts_ferias))
 tsts_com_veiculo = df_alocacoes[df_alocacoes['veiculo'].notnull() & (df_alocacoes['veiculo'] != '') & (df_alocacoes['veiculo'] != 'Nenhum')]['tst'].nunique() if not df_alocacoes.empty else 0
 
 with col1:
-    st.metric("Total TSTs", total_tsts)
+    st.metric("Total de TSTs na Equipe", total_tsts)
 with col2:
-    st.metric("Alocados em Projetos", tsts_alocados)
+    st.metric("TSTs Alocados em Projetos", tsts_alocados)
 with col3:
-    st.metric("Em Férias", tsts_ferias)
+    st.metric("TSTs Em Férias", tsts_ferias)
 with col4:
-    st.metric("Sem Alocação", tsts_livres)
+    st.metric("TSTs Sem Alocação", tsts_livres)
 with col5:
-    st.metric("Com Veículo", tsts_com_veiculo)
+    st.metric("TSTs com Veículo", tsts_com_veiculo)
 
 st.markdown("---")
 
