@@ -2,10 +2,11 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 from datetime import date
+import plotly.express as px
 
 # Configuração da página
 st.set_page_config(
-    page_title="Chammas Engenharia - Gestão de Recursos de SSMA",
+    page_title="Chammas Engenharia - Gestão de Alocação e SSMA",
     page_icon="🏗️",
     layout="wide"
 )
@@ -138,7 +139,7 @@ def execute_db(query, params=()):
     conn.commit()
     conn.close()
 
-# Cabeçalho Institucional
+# Cabeçalho
 st.markdown("""
 <div class="main-header">
     <h1 style="margin:0;">CHAMMAS ENGENHARIA</h1>
@@ -164,32 +165,71 @@ tsts_livres = max(0, total_tsts - (tsts_alocados + tsts_ferias))
 tsts_com_veiculo = df_alocacoes[df_alocacoes['veiculo'].notnull() & (df_alocacoes['veiculo'] != '') & (df_alocacoes['veiculo'] != 'Nenhum')]['tst'].nunique() if not df_alocacoes.empty else 0
 
 with col1:
-    st.metric("Total de TSTs na Equipe", total_tsts)
+    st.metric("Total TSTs", total_tsts)
 with col2:
-    st.metric("TSTs Alocados em Projetos", tsts_alocados)
+    st.metric("Alocados em Projetos", tsts_alocados)
 with col3:
-    st.metric("TSTs Em Férias", tsts_ferias)
+    st.metric("Em Férias", tsts_ferias)
 with col4:
-    st.metric("TSTs Sem Alocação", tsts_livres)
+    st.metric("Sem Alocação", tsts_livres)
 with col5:
-    st.metric("TSTs com Veículo", tsts_com_veiculo)
+    st.metric("Com Veículo", tsts_com_veiculo)
 
 st.markdown("---")
 
-menu = st.tabs(["📊 Visão Sistêmica", "➕ Nova Alocação", "🌴 Gestão de Férias", "📥 Exportar para Power BI"])
+menu = st.tabs(["📊 Visão Sistêmica (Gantt)", "➕ Nova Alocação", "🌴 Gestão de Férias", "📥 Exportar para Power BI"])
 
+# TAB 1: VISÃO GANTT VISUAL
 with menu[0]:
-    st.subheader("Gantt de Alocação por Projetos")
+    st.subheader(" Gráfico de Gantt: Alocação por Projeto")
     if not df_alocacoes.empty:
+        # Preparação das datas para o Plotly
+        df_alocacoes['data_inicio'] = pd.to_datetime(df_alocacoes['data_inicio'])
+        df_alocacoes['data_fim'] = pd.to_datetime(df_alocacoes['data_fim'])
+        df_alocacoes['Tipo'] = df_alocacoes['is_substituicao'].apply(lambda x: 'Substituição de Férias' if x == 1 else 'Titular')
+        
+        # Gráfico de Gantt
+        fig_gantt = px.timeline(
+            df_alocacoes,
+            x_start="data_inicio",
+            x_end="data_fim",
+            y="projeto",
+            color="Tipo",
+            hover_data=["tst", "veiculo", "etilometro", "observacao"],
+            color_discrete_map={'Titular': '#5C061C', 'Substituição de Férias': '#E65100'},
+            title="Linha do Tempo de Projetos e Alocações"
+        )
+        fig_gantt.update_yaxes(autorange="reversed")
+        fig_gantt.update_layout(height=400, margin=dict(l=0, r=0, t=40, b=0))
+        st.plotly_chart(fig_gantt, use_container_width=True)
+
+        st.markdown("### 📋 Tabela Detalhada de Alocações")
         st.dataframe(
-            df_alocacoes[['projeto', 'tst', 'veiculo', 'etilometro', 'data_inicio', 'data_fim', 'is_substituicao', 'observacao']],
+            df_alocacoes[['projeto', 'tst', 'veiculo', 'etilometro', 'data_inicio', 'data_fim', 'Tipo', 'observacao']],
             use_container_width=True
         )
     else:
-        st.info("Nenhuma alocação registrada até o momento.")
+        st.info("Nenhuma alocação registrada até o momento. Cadastre novas alocações na aba 'Nova Alocação'.")
 
-    st.subheader("Cronograma de Férias da Equipe")
+    st.markdown("---")
+    st.subheader(" Cronograma de Férias da Equipe")
     if not df_ferias.empty:
+        df_ferias['data_inicio'] = pd.to_datetime(df_ferias['data_inicio'])
+        df_ferias['data_fim'] = pd.to_datetime(df_ferias['data_fim'])
+
+        fig_ferias = px.timeline(
+            df_ferias,
+            x_start="data_inicio",
+            x_end="data_fim",
+            y="tst",
+            hover_data=["substituto"],
+            color_discrete_sequence=['#E65100'],
+            title="Escala de Férias dos TSTs"
+        )
+        fig_ferias.update_yaxes(autorange="reversed")
+        fig_ferias.update_layout(height=350, margin=dict(l=0, r=0, t=40, b=0))
+        st.plotly_chart(fig_ferias, use_container_width=True)
+
         st.dataframe(
             df_ferias[['tst', 'substituto', 'data_inicio', 'data_fim']],
             use_container_width=True
@@ -197,6 +237,7 @@ with menu[0]:
     else:
         st.info("Nenhum período de férias registrado.")
 
+# TAB 2: NOVA ALOCAÇÃO
 with menu[1]:
     st.subheader("Registrar Alocação Diária / Projeto")
     with st.form("form_alocacao"):
@@ -212,46 +253,4 @@ with menu[1]:
         is_sub = st.checkbox("Esta alocação é uma substituição de férias?")
         obs = st.text_input("Observações")
         
-        btn_alocar = st.form_submit_button("Salvar Alocação")
-        
-        if btn_alocar:
-            execute_db(
-                "INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao) VALUES (?,?,?,?,?,?,?,?)",
-                (projeto_sel, tst_sel, veiculo_sel, etilometro_sel, str(dt_inicio), str(dt_fim), 1 if is_sub else 0, obs)
-            )
-            st.success("Alocação registrada com sucesso!")
-            st.rerun()
-
-with menu[2]:
-    st.subheader("Lançar Férias de TST")
-    with st.form("form_ferias"):
-        tst_ferias = st.selectbox("TST em Férias", df_tsts)
-        tst_sub = st.selectbox("TST Substituto Designado", ["Nenhum"] + df_tsts)
-        
-        c_f1, c_f2 = st.columns(2)
-        f_inicio = c_f1.date_input("Início das Férias", date.today())
-        f_fim = c_f2.date_input("Fim das Férias", date.today())
-        
-        btn_ferias = st.form_submit_button("Registrar Férias")
-        if btn_ferias:
-            execute_db(
-                "INSERT INTO ferias (tst, substituto, data_inicio, data_fim) VALUES (?,?,?,?)",
-                (tst_ferias, tst_sub, str(f_inicio), str(f_fim))
-            )
-            st.success("Férias registradas com sucesso!")
-            st.rerun()
-
-with menu[3]:
-    st.subheader("Exportação de Dados para Power BI")
-    st.write("Baixe o arquivo CSV da tabela fato para conectar no seu relatório do Power BI.")
-    
-    if not df_alocacoes.empty:
-        csv = df_alocacoes.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Baixar fato_alocacoes.csv",
-            data=csv,
-            file_name="fato_alocacoes_chammas.csv",
-            mime="text/csv"
-        )
-    else:
-        st.warning("Sem dados de alocação para exportar.")
+        btn_alocar = st.form_submit_button("Salvar Al
