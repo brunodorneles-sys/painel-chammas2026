@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-from datetime import datetime, date, timedelta
+from datetime import datetime, date
 import calendar
 
 # Configuração da página
@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização CSS personalizada (Cores Vinho e Laranja da Chammas + Tabela estilo Planilha)
+# Estilização CSS personalizada (Cores Vinho e Laranja da Chammas)
 st.markdown("""
 <style>
     :root {
@@ -54,6 +54,7 @@ st.markdown("""
         border-radius: 8px;
         border: 1px solid #ddd;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        margin-bottom: 20px;
     }
 
     .gantt-table {
@@ -66,7 +67,7 @@ st.markdown("""
     .gantt-table th, .gantt-table td {
         border: 1px solid #ccc;
         text-align: center;
-        padding: 4px 2px;
+        padding: 6px 4px;
         white-space: nowrap;
     }
 
@@ -82,7 +83,7 @@ st.markdown("""
         background-color: #f8f9fa;
         color: #333;
         font-weight: bold;
-        min-width: 25px;
+        min-width: 28px;
     }
 
     .gantt-table td.col-info {
@@ -173,3 +174,15 @@ def init_db():
         c.executemany("INSERT INTO veiculos (placa) VALUES (?)", [(v,) for v in veiculos_iniciais])
 
     c.execute("SELECT COUNT(*) FROM etilometros")
+    if c.fetchone()[0] == 0:
+        etilometros_iniciais = ['18302', '18303', '18304', '18305', '18306', '18307', '19407', '19408']
+        c.executemany("INSERT INTO etilometros (codigo) VALUES (?)", [(e,) for e in etilometros_iniciais])
+
+    c.execute("SELECT COUNT(*) FROM projetos")
+    if c.fetchone()[0] == 0:
+        projetos_iniciais = [
+            'Gerdau - 5955', 'Vale Brucutu - 5930', 'Gerdau - 5919', 'Vale Norte - 5426', 
+            'St. George - 6874', 'Jaguar - 6132', 'Vale - 6300', 'Vale Itabira - 5907', 
+            'Kinross - 5852', 'Vale Água Limpa - 5930', 'CBMM - 6150', 'Gerdau - 6677'
+        ]
+        c.executemany("INSERT INTO projetos (nome
