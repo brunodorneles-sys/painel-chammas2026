@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import calendar
 
 # Configuração da página
@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização CSS personalizada (Cores Vinho e Laranja da Chammas + Tabela estilo Planilha)
+# Estilização CSS personalizada
 st.markdown("""
 <style>
     :root {
@@ -40,11 +40,6 @@ st.markdown("""
         border-radius: 4px;
         font-weight: bold;
     }
-    
-    .stButton>button:hover {
-        background-color: #BF360C;
-        color: white;
-    }
 
     /* Estilização da Tabela de Matriz Diária */
     .gantt-matrix-container {
@@ -60,22 +55,22 @@ st.markdown("""
     .gantt-table {
         border-collapse: collapse;
         width: 100%;
-        font-size: 12px;
+        font-size: 11px;
         font-family: Arial, sans-serif;
     }
 
     .gantt-table th, .gantt-table td {
         border: 1px solid #ccc;
         text-align: center;
-        padding: 6px 4px;
+        padding: 5px 3px;
         white-space: nowrap;
     }
 
     .gantt-table th.header-month {
-        background-color: #f2d7d5;
-        color: #5C061C;
+        background-color: #5C061C;
+        color: white;
         font-weight: bold;
-        font-size: 14px;
+        font-size: 12px;
         text-transform: uppercase;
     }
 
@@ -83,7 +78,7 @@ st.markdown("""
         background-color: #f8f9fa;
         color: #333;
         font-weight: bold;
-        min-width: 28px;
+        min-width: 24px;
     }
 
     .gantt-table td.col-info {
@@ -94,27 +89,27 @@ st.markdown("""
         background-color: #fafafa;
     }
 
+    /* Cores Solicitadas */
     .cell-allocated {
-        background-color: #5C061C !important;
+        background-color: #2E7D32 !important; /* VERDE */
         color: white !important;
         font-weight: bold;
     }
 
     .cell-substitution {
-        background-color: #E65100 !important;
-        color: white !important;
+        background-color: #FBC02D !important; /* AMARELO */
+        color: #212121 !important;
         font-weight: bold;
     }
 
     .cell-vacation {
-        background-color: #d9534f !important;
+        background-color: #C62828 !important; /* VERMELHO */
         color: white !important;
         font-weight: bold;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Conexão e Inicialização do Banco de Dados SQLite
 def init_db():
     conn = sqlite3.connect('chammas_gestao.db')
     c = conn.cursor()
@@ -221,106 +216,118 @@ df_projetos = run_query("SELECT nome FROM projetos")['nome'].tolist()
 df_alocacoes = run_query("SELECT * FROM alocacoes")
 df_ferias = run_query("SELECT * FROM ferias")
 
-# Indicadores em Cards
+# Cards Indicadores
 col1, col2, col3, col4, col5 = st.columns(5)
-
 total_tsts = len(df_tsts)
 tsts_alocados = df_alocacoes['tst'].nunique() if not df_alocacoes.empty else 0
 tsts_ferias = df_ferias['tst'].nunique() if not df_ferias.empty else 0
 tsts_livres = max(0, total_tsts - (tsts_alocados + tsts_ferias))
 tsts_com_veiculo = df_alocacoes[df_alocacoes['veiculo'].notnull() & (df_alocacoes['veiculo'] != '') & (df_alocacoes['veiculo'] != 'Nenhum')]['tst'].nunique() if not df_alocacoes.empty else 0
 
-with col1:
-    st.metric("Total TSTs", total_tsts)
-with col2:
-    st.metric("Alocados em Projetos", tsts_alocados)
-with col3:
-    st.metric("Em Férias", tsts_ferias)
-with col4:
-    st.metric("Sem Alocação", tsts_livres)
-with col5:
-    st.metric("Com Veículo", tsts_com_veiculo)
+with col1: st.metric("Total TSTs", total_tsts)
+with col2: st.metric("Alocados em Projetos", tsts_alocados)
+with col3: st.metric("Em Férias", tsts_ferias)
+with col4: st.metric("Sem Alocação", tsts_livres)
+with col5: st.metric("Com Veículo", tsts_com_veiculo)
 
 st.markdown("---")
 
-menu = st.tabs(["📊 Visão Sistêmica (Matriz)", "➕ Nova Alocação", "🌴 Gestão de Férias", "📥 Exportar para Power BI"])
+menu = st.tabs(["📊 Visão Sistêmica (Gantt Corrente)", "➕ Nova Alocação", "🌴 Gestão de Férias", "📥 Exportar para Power BI"])
 
-# TAB 1: MATRIZ DIÁRIA ESTILO PLANILHA
+# TAB 1: CALENDÁRIO CORRENTE
 with menu[0]:
-    st.subheader("Matriz Diária de Alocação (Escala de Campo)")
+    st.subheader("Matriz do Cronograma Corrente")
     
-    col_m, col_a = st.columns(2)
-    meses_nomes = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO']
-    mes_sel_nome = col_m.selectbox("Selecione o Mês para Visualização", meses_nomes, index=datetime.now().month - 1)
-    ano_sel = col_a.number_input("Ano", min_value=2024, max_value=2030, value=datetime.now().year)
+    col_d1, col_d2 = st.columns(2)
+    dt_inicio_vis = col_d1.date_input("Visualizar de:", date.today().replace(day=1))
+    dt_fim_vis = col_d2.date_input("Até:", date.today().replace(day=1) + timedelta(days=60))
     
-    mes_num = meses_nomes.index(mes_sel_nome) + 1
-    num_dias = calendar.monthrange(ano_sel, mes_num)[1]
-    
-    # Construção da Tabela HTML
-    html_lines = []
-    html_lines.append('<div class="gantt-matrix-container"><table class="gantt-table">')
-    
-    # Cabeçalho: Mês e Dias
-    html_lines.append(f'<thead><tr><th rowspan="2">Nº</th><th rowspan="2">Colaborador (TST)</th><th rowspan="2">Unidade / Projeto</th><th colspan="{num_dias}" class="header-month">{mes_sel_nome} {ano_sel}</th></tr><tr>')
-    for dia in range(1, num_dias + 1):
-        html_lines.append(f'<th class="header-day">{dia}</th>')
-    html_lines.append('</tr></thead><tbody>')
-    
-    # Linhas dos TSTs
-    for idx, tst_nome in enumerate(df_tsts, start=1):
-        aloc_tst = df_alocacoes[df_alocacoes['tst'] == tst_nome] if not df_alocacoes.empty else pd.DataFrame()
-        unidade_nome = aloc_tst['projeto'].iloc[-1] if not aloc_tst.empty else "-"
+    if dt_inicio_vis <= dt_fim_vis:
+        datas_lista = pd.date_range(start=dt_inicio_vis, end=dt_fim_vis)
         
-        html_lines.append(f'<tr><td>{idx}</td><td class="col-info">{tst_nome}</td><td class="col-info">{unidade_nome}</td>')
+        # Agrupar por Mês para o Cabeçalho
+        meses_grupos = {}
+        for d in datas_lista:
+            chave_mes = d.strftime("%b/%Y").upper()
+            meses_grupos[chave_mes] = meses_grupos.get(chave_mes, 0) + 1
+            
+        html_lines = []
+        html_lines.append('<div class="gantt-matrix-container"><table class="gantt-table">')
         
-        for dia in range(1, num_dias + 1):
-            data_atual_str = f"{ano_sel:04d}-{mes_num:02d}-{dia:02d}"
-            
-            cell_class = ""
-            cell_text = ""
-            
-            # Férias
-            if not df_ferias.empty:
-                ferias_ativa = df_ferias[(df_ferias['tst'] == tst_nome) & (df_ferias['data_inicio'] <= data_atual_str) & (df_ferias['data_fim'] >= data_atual_str)]
-                if not ferias_ativa.empty:
-                    cell_class = "cell-vacation"
-                    cell_text = "F"
-            
-            # Alocações
-            if not cell_class and not df_alocacoes.empty:
-                aloc_ativa = df_alocacoes[(df_alocacoes['tst'] == tst_nome) & (df_alocacoes['data_inicio'] <= data_atual_str) & (df_alocacoes['data_fim'] >= data_atual_str)]
-                if not aloc_ativa.empty:
-                    is_sub = aloc_ativa['is_substituicao'].iloc[0]
-                    if is_sub == 1:
-                        cell_class = "cell-substitution"
-                        cell_text = "S"
-                    else:
-                        cell_class = "cell-allocated"
-                        cell_text = "X"
-            
-            html_lines.append(f'<td class="{cell_class}">{cell_text}</td>')
-            
-        html_lines.append('</tr>')
+        # Linha 1: Meses
+        html_lines.append('<thead><tr><th rowspan="2">Nº</th><th rowspan="2">Colaborador (TST)</th><th rowspan="2">Projeto Atual</th>')
+        for m_nome, count_dias in meses_grupos.items():
+            html_lines.append(f'<th colspan="{count_dias}" class="header-month">{m_nome}</th>')
+        html_lines.append('</tr><tr>')
         
-    html_lines.append('</tbody></table></div>')
-    
-    st.markdown("".join(html_lines), unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div style="margin-top: 10px; margin-bottom: 25px; display: flex; gap: 20px; font-size: 13px;">
-        <div><span style="background-color: #5C061C; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">X</span> Titular Alocado</div>
-        <div><span style="background-color: #E65100; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">S</span> Substituição de Férias</div>
-        <div><span style="background-color: #d9534f; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">F</span> Em Férias</div>
-    </div>
-    """, unsafe_allow_html=True)
+        # Linha 2: Dias
+        for d in datas_lista:
+            html_lines.append(f'<th class="header-day">{d.day}</th>')
+        html_lines.append('</tr></thead><tbody>')
+        
+        # Preenchimento das Linhas
+        for idx, tst_nome in enumerate(df_tsts, start=1):
+            aloc_tst = df_alocacoes[df_alocacoes['tst'] == tst_nome] if not df_alocacoes.empty else pd.DataFrame()
+            unidade_nome = aloc_tst['projeto'].iloc[-1] if not aloc_tst.empty else "-"
+            
+            html_lines.append(f'<tr><td>{idx}</td><td class="col-info">{tst_nome}</td><td class="col-info">{unidade_nome}</td>')
+            
+            for d in datas_lista:
+                data_curr_str = d.strftime('%Y-%m-%d')
+                cell_class = ""
+                cell_text = ""
+                
+                # Férias (VERMELHO)
+                if not df_ferias.empty:
+                    ferias_act = df_ferias[(df_ferias['tst'] == tst_nome) & (df_ferias['data_inicio'] <= data_curr_str) & (df_ferias['data_fim'] >= data_curr_str)]
+                    if not ferias_act.empty:
+                        cell_class = "cell-vacation"
+                        cell_text = "F"
+                
+                # Alocação (VERDE ou AMARELO)
+                if not cell_class and not df_alocacoes.empty:
+                    aloc_act = df_alocacoes[(df_alocacoes['tst'] == tst_nome) & (df_alocacoes['data_inicio'] <= data_curr_str) & (df_alocacoes['data_fim'] >= data_curr_str)]
+                    if not aloc_act.empty:
+                        is_sub = aloc_act['is_substituicao'].iloc[0]
+                        if is_sub == 1:
+                            cell_class = "cell-substitution"
+                            cell_text = "S"
+                        else:
+                            cell_class = "cell-allocated"
+                            cell_text = "X"
+                            
+                html_lines.append(f'<td class="{cell_class}">{cell_text}</td>')
+            html_lines.append('</tr>')
+            
+        html_lines.append('</tbody></table></div>')
+        st.markdown("".join(html_lines), unsafe_allow_html=True)
+        
+        # Legenda
+        st.markdown("""
+        <div style="margin-top: 10px; margin-bottom: 25px; display: flex; gap: 20px; font-size: 13px;">
+            <div><span style="background-color: #2E7D32; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">X</span> Alocação Titular (Verde)</div>
+            <div><span style="background-color: #FBC02D; color: black; padding: 2px 8px; border-radius: 3px; font-weight: bold;">S</span> Substituto de Férias (Amarelo)</div>
+            <div><span style="background-color: #C62828; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">F</span> Ausência por Férias (Vermelho)</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.error("A data final deve ser maior ou igual à data inicial.")
 
     st.markdown("---")
-    st.markdown("### 📋 Registros de Alocações Cadastrados")
+    st.markdown("### ✏️ Gerenciar e Excluir Alocações Existentes")
     if not df_alocacoes.empty:
-        st.dataframe(df_alocacoes[['projeto', 'tst', 'veiculo', 'etilometro', 'data_inicio', 'data_fim', 'is_substituicao', 'observacao']], use_container_width=True)
+        for index, row in df_alocacoes.iterrows():
+            col_a1, col_a2, col_a3, col_a4, col_a5 = st.columns([3, 3, 3, 3, 1])
+            col_a1.write(f"**Projeto:** {row['projeto']}")
+            col_a2.write(f"**TST:** {row['tst']}")
+            col_a3.write(f"**Veículo:** {row['veiculo']} | **Etilômetro:** {row['etilometro']}")
+            col_a4.write(f"**Período:** {row['data_inicio']} até {row['data_fim']}")
+            if col_a5.button("🗑️", key=f"del_aloc_{row['id']}"):
+                execute_db("DELETE FROM alocacoes WHERE id = ?", (row['id'],))
+                st.success("Alocação excluída!")
+                st.rerun()
     else:
-        st.info("Nenhuma alocação registrada no banco de dados.")
+        st.info("Nenhuma alocação cadastrada.")
 
 # TAB 2: NOVA ALOCAÇÃO
 with menu[1]:
@@ -367,6 +374,19 @@ with menu[2]:
             )
             st.success("Férias registradas com sucesso!")
             st.rerun()
+
+    st.markdown("---")
+    st.markdown("### ✏️ Gerenciar e Excluir Registros de Férias")
+    if not df_ferias.empty:
+        for index, row in df_ferias.iterrows():
+            col_f1, col_f2, col_f3, col_f4 = st.columns([4, 4, 3, 1])
+            col_f1.write(f"**TST em Férias:** {row['tst']}")
+            col_f2.write(f"**Substituto:** {row['substituto']}")
+            col_f3.write(f"**Período:** {row['data_inicio']} até {row['data_fim']}")
+            if col_f4.button("🗑️", key=f"del_ferias_{row['id']}"):
+                execute_db("DELETE FROM ferias WHERE id = ?", (row['id'],))
+                st.success("Registro de férias excluído!")
+                st.rerun()
 
 # TAB 4: POWER BI
 with menu[3]:
