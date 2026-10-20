@@ -457,7 +457,7 @@ with menu[1]:
             st.success("Alocação registrada com sucesso!")
             st.rerun()
 
-# TAB 3: GESTÃO DE FÉRIAS (COM VALIDAÇÃO DE DISPONIBILIDADE DO SUBSTITUTO)
+# TAB 3: GESTÃO DE FÉRIAS (REGISTRO AUTOMÁTICO DE COBERTURA DO SUBSTITUTO)
 with menu[2]:
     st.subheader("Lançar Férias de TST")
     with st.form("form_ferias"):
@@ -475,12 +475,22 @@ with menu[2]:
             elif tst_sub != "Nenhum" and not verificar_disponibilidade_tst(tst_sub, str(f_inicio), str(f_fim)):
                 st.error(f"❌ **TST Não Disponível!** O substituto **{tst_sub}** possui outros compromissos no período de **{f_inicio.strftime('%d/%m/%Y')}** a **{f_fim.strftime('%d/%m/%Y')}**.")
             else:
+                # 1. Registra Férias do Titular
                 execute_db(
                     "INSERT INTO ferias (tst, substituto, data_inicio, data_fim) VALUES (?,?,?,?)",
                     (tst_ferias, tst_sub, str(f_inicio), str(f_fim))
                 )
+                
+                # 2. Registra Alocação do Substituto em Amarelo (S) no Projeto do Titular
                 if tst_sub != "Nenhum":
-                    st.success(f"✅ Férias registradas! O TST **{tst_sub}** está disponível e cobrirá o colaborador no período.")
+                    aloc_titular = df_alocacoes[df_alocacoes['tst'] == tst_ferias] if not df_alocacoes.empty else pd.DataFrame()
+                    projeto_cobertura = aloc_titular['projeto'].iloc[-1] if not aloc_titular.empty else "Cobertura de Férias"
+                    
+                    execute_db(
+                        "INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao) VALUES (?,?,?,?,?,?,?,?)",
+                        (projeto_cobertura, tst_sub, "Nenhum", "Nenhum", str(f_inicio), str(f_fim), 1, f"Cobertura de férias de {tst_ferias}")
+                    )
+                    st.success(f"✅ Férias registradas! O TST **{tst_sub}** foi alocado em amarelo (S) para cobrir o projeto **{projeto_cobertura}**.")
                 else:
                     st.success("✅ Férias registradas com sucesso!")
                 st.rerun()
@@ -495,7 +505,10 @@ with menu[2]:
             col_f3.write(f"**Período:** {row['data_inicio']} até {row['data_fim']}")
             if col_f4.button("🗑️", key=f"del_ferias_{row['id']}"):
                 execute_db("DELETE FROM ferias WHERE id = ?", (row['id'],))
-                st.success("Registro de férias excluído!")
+                # Remove também alocação de substituição associada
+                if row['substituto'] and row['substituto'] != "Nenhum":
+                    execute_db("DELETE FROM alocacoes WHERE tst = ? AND is_substituicao = 1 AND data_inicio = ? AND data_fim = ?", (row['substituto'], row['data_inicio'], row['data_fim']))
+                st.success("Registro de férias e substituição excluídos!")
                 st.rerun()
 
 # TAB 4: CADASTROS BASE DE RECURSOS
