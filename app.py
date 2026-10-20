@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time
 import calendar
 
 # Configuração da página
@@ -242,6 +242,45 @@ def execute_db(query, params=()):
     conn.commit()
     conn.close()
 
+# Função de Virada Automática Diária às 06:00 a.m. UTC-3
+def processar_auto_alocacao_diaria():
+    agora = datetime.now()
+    hoje = agora.date()
+    ontem = hoje - timedelta(days=1)
+    
+    # Executa a virada diária caso a hora atual seja 06:00 a.m. ou mais tarde
+    if agora.time() >= time(6, 0):
+        conn = sqlite3.connect('chammas_gestao.db')
+        c = conn.cursor()
+        
+        # Seleciona alocações ativas no dia anterior
+        c.execute("""
+            SELECT projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao 
+            FROM alocacoes 
+            WHERE data_inicio <= ? AND data_fim >= ?
+        """, (str(ontem), str(ontem)))
+        alocacoes_ontem = c.fetchall()
+        
+        for aloc in alocacoes_ontem:
+            proj, tst_nom, veic, etil, d_ini, d_fim, is_sub, obs = aloc
+            
+            # Se a data de término for hoje ou posterior, estende para o dia atual se não existir registro
+            if d_fim >= str(hoje):
+                c.execute("SELECT COUNT(*) FROM alocacoes WHERE tst = ? AND data_inicio <= ? AND data_fim >= ?", (tst_nom, str(hoje), str(hoje)))
+                ja_alocado_hoje = c.fetchone()[0] > 0
+                
+                if not ja_alocado_hoje:
+                    c.execute("""
+                        INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (proj, tst_nom, veic, etil, str(hoje), d_fim, is_sub, f"Propagado automaticamente das 06h: {obs}"))
+        
+        conn.commit()
+        conn.close()
+
+# Executa a verificação/automação diária
+processar_auto_alocacao_diaria()
+
 def verificar_disponibilidade_tst(tst_nome, dt_inicio_str, dt_fim_str):
     conn = sqlite3.connect('chammas_gestao.db')
     c = conn.cursor()
@@ -315,6 +354,7 @@ menu = st.tabs(["📊 Visão Sistêmica", "➕ Nova Alocação", "🌴 Gestão d
 # TAB 1: VISÃO SISTÊMICA (GESTÃO DIÁRIA DE RECURSOS HUMANOS)
 with menu[0]:
     st.subheader("Gestão diária de Recursos Humanos")
+    st.caption("ℹ️ *A virada diária ocorre automaticamente às 06:00 a.m. (UTC-3), mantendo as alocações vigentes do dia anterior.*")
     
     col_d1, col_d2 = st.columns(2)
     dt_inicio_vis = col_d1.date_input("Visualizar Período de:", date.today().replace(day=1))
