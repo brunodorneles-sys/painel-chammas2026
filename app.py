@@ -4,10 +4,13 @@ import sqlite3
 from datetime import datetime, date, timedelta
 import calendar
 
+# URL da Logo Oficial da Chammas Engenharia
+LOGO_URL = "https://chammasengenharia.com.br/wp-content/uploads/2023/12/logo-chammas.png"
+
 # Configuração da página
 st.set_page_config(
     page_title="Chammas Engenharia - Gestão de Recursos SSMA",
-    page_icon="🏗️",
+    page_icon=LOGO_URL,
     layout="wide"
 )
 
@@ -27,11 +30,14 @@ st.markdown("""
     .main-header {
         background: linear-gradient(135deg, #5C061C 0%, #3D0412 100%);
         color: white;
-        padding: 20px 25px;
+        padding: 15px 25px;
         border-radius: 8px;
         margin-bottom: 25px;
         border-bottom: 4px solid #E65100;
         box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
     }
 
     .stButton>button {
@@ -206,15 +212,41 @@ def execute_db(query, params=()):
     conn.commit()
     conn.close()
 
-# Cabeçalho com Logo da Chammas e Título Solicitado
-st.markdown("""
-<div class="main-header d-flex align-items-center">
-    <div style="display: flex; align-items: center; gap: 15px;">
-        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="#E65100"/>
-            <path d="M2 17L12 22L22 17" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M2 12L12 17L22 12" stroke="#E65100" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
+# Função para verificar se TST está disponível no período
+def verificar_disponibilidade_tst(tst_nome, dt_inicio_str, dt_fim_str):
+    conn = sqlite3.connect('chammas_gestao.db')
+    c = conn.cursor()
+    
+    # 1. Verifica se está em férias no período
+    c.execute("""
+        SELECT COUNT(*) FROM ferias 
+        WHERE tst = ? AND (
+            (data_inicio <= ? AND data_fim >= ?) OR
+            (data_inicio <= ? AND data_fim >= ?) OR
+            (? <= data_inicio AND ? >= data_fim)
+        )
+    """, (tst_nome, dt_inicio_str, dt_inicio_str, dt_fim_str, dt_fim_str, dt_inicio_str, dt_fim_str))
+    em_ferias = c.fetchone()[0] > 0
+
+    # 2. Verifica se já está em alocação de projeto/cobertura no período
+    c.execute("""
+        SELECT COUNT(*) FROM alocacoes 
+        WHERE tst = ? AND (
+            (data_inicio <= ? AND data_fim >= ?) OR
+            (data_inicio <= ? AND data_fim >= ?) OR
+            (? <= data_inicio AND ? >= data_fim)
+        )
+    """, (tst_nome, dt_inicio_str, dt_inicio_str, dt_fim_str, dt_fim_str, dt_inicio_str, dt_fim_str))
+    em_alocacao = c.fetchone()[0] > 0
+
+    conn.close()
+    return not (em_ferias or em_alocacao)
+
+# Cabeçalho com a Logo Oficial da Chammas Engenharia
+st.markdown(f"""
+<div class="main-header">
+    <div style="display: flex; align-items: center; gap: 20px;">
+        <img src="{LOGO_URL}" alt="Chammas Engenharia Logo" style="height: 50px; background-color: white; padding: 5px 12px; border-radius: 6px;">
         <div>
             <h1 style="margin:0; font-size: 1.8rem; font-weight: 800; letter-spacing: 1px;">CHAMMAS <span style="color:#E65100;">ENGENHARIA</span></h1>
             <p style="margin:0; font-size: 0.95rem; opacity: 0.9; font-weight: 600;">Gestão de Recursos SSMA</p>
@@ -369,7 +401,7 @@ with menu[1]:
             st.success("Alocação registrada com sucesso!")
             st.rerun()
 
-# TAB 3: GESTÃO DE FÉRIAS
+# TAB 3: GESTÃO DE FÉRIAS (COM VALIDAÇÃO DE DISPONIBILIDADE DO SUBSTITUTO)
 with menu[2]:
     st.subheader("Lançar Férias de TST")
     with st.form("form_ferias"):
@@ -382,12 +414,20 @@ with menu[2]:
         
         btn_ferias = st.form_submit_button("Registrar Férias")
         if btn_ferias:
-            execute_db(
-                "INSERT INTO ferias (tst, substituto, data_inicio, data_fim) VALUES (?,?,?,?)",
-                (tst_ferias, tst_sub, str(f_inicio), str(f_fim))
-            )
-            st.success("Férias registradas com sucesso!")
-            st.rerun()
+            if tst_ferias == tst_sub:
+                st.error("❌ O TST em férias não pode ser o seu próprio substituto!")
+            elif tst_sub != "Nenhum" and not verificar_disponibilidade_tst(tst_sub, str(f_inicio), str(f_fim)):
+                st.error(f"❌ **TST Não Disponível!** O substituto **{tst_sub}** possui outros compromissos (alocação ou férias) no período de **{f_inicio.strftime('%d/%m/%Y')}** a **{f_fim.strftime('%d/%m/%Y')}**.")
+            else:
+                execute_db(
+                    "INSERT INTO ferias (tst, substituto, data_inicio, data_fim) VALUES (?,?,?,?)",
+                    (tst_ferias, tst_sub, str(f_inicio), str(f_fim))
+                )
+                if tst_sub != "Nenhum":
+                    st.success(f"✅ Férias registradas! O TST **{tst_sub}** está disponível e cobrirá o colaborador no período.")
+                else:
+                    st.success("✅ Férias registradas com sucesso!")
+                st.rerun()
 
     st.markdown("---")
     st.markdown("### ✏️ Gerenciar e Excluir Registros de Férias")
@@ -483,7 +523,7 @@ with menu[3]:
                     st.rerun()
                 except:
                     st.error("Etilômetro já cadastrado ou erro na gravação.")
-        st.write("##### Etilômetros Existentes:")
+        st.write("##### Etilometros Existentes:")
         df_e_full = run_query("SELECT id, codigo FROM etilometros")
         for idx, r in df_e_full.iterrows():
             c1, c2 = st.columns([5, 1])
