@@ -6,12 +6,12 @@ import calendar
 
 # Configuração da página
 st.set_page_config(
-    page_title="Chammas Engenharia - Gestão de Alocação e SSMA",
+    page_title="Chammas Engenharia - Gestão de Recursos SSMA",
     page_icon="🏗️",
     layout="wide"
 )
 
-# Estilização CSS personalizada
+# Estilização CSS personalizada com Cores Institucionais
 st.markdown("""
 <style>
     :root {
@@ -25,12 +25,13 @@ st.markdown("""
     }
     
     .main-header {
-        background-color: #5C061C;
+        background: linear-gradient(135deg, #5C061C 0%, #3D0412 100%);
         color: white;
-        padding: 20px;
+        padding: 20px 25px;
         border-radius: 8px;
         margin-bottom: 25px;
         border-bottom: 4px solid #E65100;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
 
     .stButton>button {
@@ -39,6 +40,11 @@ st.markdown("""
         border: none;
         border-radius: 4px;
         font-weight: bold;
+    }
+
+    .stButton>button:hover {
+        background-color: #BF360C;
+        color: white;
     }
 
     /* Estilização da Tabela de Matriz Diária */
@@ -89,7 +95,7 @@ st.markdown("""
         background-color: #fafafa;
     }
 
-    /* Cores Solicitadas */
+    /* Cores das Células */
     .cell-allocated {
         background-color: #2E7D32 !important; /* VERDE */
         color: white !important;
@@ -200,18 +206,27 @@ def execute_db(query, params=()):
     conn.commit()
     conn.close()
 
-# Cabeçalho
+# Cabeçalho com Logo da Chammas e Título Solicitado
 st.markdown("""
-<div class="main-header">
-    <h1 style="margin:0;">CHAMMAS ENGENHARIA</h1>
-    <p style="margin:0; opacity: 0.9;">Informação Geotécnica & Segurança Operacional | Painel Sistêmico de Alocação</p>
+<div class="main-header d-flex align-items-center">
+    <div style="display: flex; align-items: center; gap: 15px;">
+        <svg width="42" height="42" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2L2 7L12 12L22 7L12 2Z" fill="#E65100"/>
+            <path d="M2 17L12 22L22 17" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M2 12L12 17L22 12" stroke="#E65100" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div>
+            <h1 style="margin:0; font-size: 1.8rem; font-weight: 800; letter-spacing: 1px;">CHAMMAS <span style="color:#E65100;">ENGENHARIA</span></h1>
+            <p style="margin:0; font-size: 0.95rem; opacity: 0.9; font-weight: 600;">Gestão de Recursos SSMA</p>
+        </div>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
-df_tsts = run_query("SELECT nome FROM tsts")['nome'].tolist()
-df_veiculos = run_query("SELECT placa FROM veiculos")['placa'].tolist()
-df_etilometros = run_query("SELECT codigo FROM etilometros")['codigo'].tolist()
-df_projetos = run_query("SELECT nome FROM projetos")['nome'].tolist()
+df_tsts = run_query("SELECT id, nome FROM tsts")['nome'].tolist()
+df_veiculos = run_query("SELECT id, placa FROM veiculos")['placa'].tolist()
+df_etilometros = run_query("SELECT id, codigo FROM etilometros")['codigo'].tolist()
+df_projetos = run_query("SELECT id, nome FROM projetos")['nome'].tolist()
 
 df_alocacoes = run_query("SELECT * FROM alocacoes")
 df_ferias = run_query("SELECT * FROM ferias")
@@ -232,20 +247,19 @@ with col5: st.metric("Com Veículo", tsts_com_veiculo)
 
 st.markdown("---")
 
-menu = st.tabs(["📊 Visão Sistêmica (Gantt Corrente)", "➕ Nova Alocação", "🌴 Gestão de Férias", "📥 Exportar para Power BI"])
+menu = st.tabs(["📊 Visão Sistêmica", "➕ Nova Alocação", "🌴 Gestão de Férias", "⚙️ Cadastros Base", "📥 Exportar para Power BI"])
 
-# TAB 1: CALENDÁRIO CORRENTE
+# TAB 1: VISÃO SISTÊMICA (GESTÃO DIÁRIA DE RECURSOS HUMANOS)
 with menu[0]:
-    st.subheader("Matriz do Cronograma Corrente")
+    st.subheader("Gestão diária de Recursos Humanos")
     
     col_d1, col_d2 = st.columns(2)
-    dt_inicio_vis = col_d1.date_input("Visualizar de:", date.today().replace(day=1))
+    dt_inicio_vis = col_d1.date_input("Visualizar Período de:", date.today().replace(day=1))
     dt_fim_vis = col_d2.date_input("Até:", date.today().replace(day=1) + timedelta(days=60))
     
     if dt_inicio_vis <= dt_fim_vis:
         datas_lista = pd.date_range(start=dt_inicio_vis, end=dt_fim_vis)
         
-        # Agrupar por Mês para o Cabeçalho
         meses_grupos = {}
         for d in datas_lista:
             chave_mes = d.strftime("%b/%Y").upper()
@@ -265,7 +279,7 @@ with menu[0]:
             html_lines.append(f'<th class="header-day">{d.day}</th>')
         html_lines.append('</tr></thead><tbody>')
         
-        # Preenchimento das Linhas
+        # Preenchimento
         for idx, tst_nome in enumerate(df_tsts, start=1):
             aloc_tst = df_alocacoes[df_alocacoes['tst'] == tst_nome] if not df_alocacoes.empty else pd.DataFrame()
             unidade_nome = aloc_tst['projeto'].iloc[-1] if not aloc_tst.empty else "-"
@@ -388,8 +402,98 @@ with menu[2]:
                 st.success("Registro de férias excluído!")
                 st.rerun()
 
-# TAB 4: POWER BI
+# TAB 4: CADASTROS BASE DE RECURSOS
 with menu[3]:
+    st.subheader("⚙️ Cadastros de Recursos e Projetos")
+    
+    tab_cad1, tab_cad2, tab_cad3, tab_cad4 = st.tabs(["Projetos", "TSTs", "Veículos", "Etilômetros"])
+    
+    # Cadastrar Projetos
+    with tab_cad1:
+        st.write("#### Cadastrar Novo Projeto")
+        with st.form("form_add_projeto"):
+            novo_proj = st.text_input("Nome do Projeto (Ex: Vale Norte - 6000)")
+            if st.form_submit_button("Adicionar Projeto") and novo_proj:
+                try:
+                    execute_db("INSERT INTO projetos (nome) VALUES (?)", (novo_proj,))
+                    st.success(f"Projeto '{novo_proj}' adicionado com sucesso!")
+                    st.rerun()
+                except:
+                    st.error("Projeto já cadastrado ou erro na gravação.")
+        st.write("##### Projetos Existentes:")
+        df_p_full = run_query("SELECT id, nome FROM projetos")
+        for idx, r in df_p_full.iterrows():
+            c1, c2 = st.columns([5, 1])
+            c1.write(r['nome'])
+            if c2.button("🗑️", key=f"del_p_{r['id']}"):
+                execute_db("DELETE FROM projetos WHERE id = ?", (r['id'],))
+                st.rerun()
+
+    # Cadastrar TSTs
+    with tab_cad2:
+        st.write("#### Cadastrar Novo TST")
+        with st.form("form_add_tst"):
+            novo_tst = st.text_input("Nome Completo do TST")
+            if st.form_submit_button("Adicionar TST") and novo_tst:
+                try:
+                    execute_db("INSERT INTO tsts (nome) VALUES (?)", (novo_tst,))
+                    st.success(f"TST '{novo_tst}' adicionado com sucesso!")
+                    st.rerun()
+                except:
+                    st.error("TST já cadastrado ou erro na gravação.")
+        st.write("##### TSTs Existentes:")
+        df_t_full = run_query("SELECT id, nome FROM tsts")
+        for idx, r in df_t_full.iterrows():
+            c1, c2 = st.columns([5, 1])
+            c1.write(r['nome'])
+            if c2.button("🗑️", key=f"del_t_{r['id']}"):
+                execute_db("DELETE FROM tsts WHERE id = ?", (r['id'],))
+                st.rerun()
+
+    # Cadastrar Veículos
+    with tab_cad3:
+        st.write("#### Cadastrar Novo Veículo")
+        with st.form("form_add_veiculo"):
+            nova_placa = st.text_input("Placa do Veículo")
+            if st.form_submit_button("Adicionar Veículo") and nova_placa:
+                try:
+                    execute_db("INSERT INTO veiculos (placa) VALUES (?)", (nova_placa.upper(),))
+                    st.success(f"Veículo '{nova_placa.upper()}' adicionado com sucesso!")
+                    st.rerun()
+                except:
+                    st.error("Veículo já cadastrado ou erro na gravação.")
+        st.write("##### Veículos Existentes:")
+        df_v_full = run_query("SELECT id, placa FROM veiculos")
+        for idx, r in df_v_full.iterrows():
+            c1, c2 = st.columns([5, 1])
+            c1.write(r['placa'])
+            if c2.button("🗑️", key=f"del_v_{r['id']}"):
+                execute_db("DELETE FROM veiculos WHERE id = ?", (r['id'],))
+                st.rerun()
+
+    # Cadastrar Etilômetros
+    with tab_cad4:
+        st.write("#### Cadastrar Novo Etilômetro")
+        with st.form("form_add_etilometro"):
+            novo_eti = st.text_input("Código/Número do Etilômetro")
+            if st.form_submit_button("Adicionar Etilômetro") and novo_eti:
+                try:
+                    execute_db("INSERT INTO etilometros (codigo) VALUES (?)", (novo_eti,))
+                    st.success(f"Etilômetro '{novo_eti}' adicionado com sucesso!")
+                    st.rerun()
+                except:
+                    st.error("Etilômetro já cadastrado ou erro na gravação.")
+        st.write("##### Etilômetros Existentes:")
+        df_e_full = run_query("SELECT id, codigo FROM etilometros")
+        for idx, r in df_e_full.iterrows():
+            c1, c2 = st.columns([5, 1])
+            c1.write(r['codigo'])
+            if c2.button("🗑️", key=f"del_e_{r['id']}"):
+                execute_db("DELETE FROM etilometros WHERE id = ?", (r['id'],))
+                st.rerun()
+
+# TAB 5: POWER BI
+with menu[4]:
     st.subheader("Exportação de Dados para Power BI")
     st.write("Baixe o arquivo CSV da tabela fato para conectar no seu relatório do Power BI.")
     
