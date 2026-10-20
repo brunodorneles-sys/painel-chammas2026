@@ -6,7 +6,7 @@ import calendar
 import os
 import base64
 
-# Função para converter a logo vetorial em Base64 para exibição direta
+# Função para converter imagem local para string Base64 segura
 def get_base64_image(image_path):
     if os.path.exists(image_path):
         with open(image_path, "rb") as img_file:
@@ -22,7 +22,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização CSS personalizada (Design limpo + Cards executivos com bordas institucionais)
+# Estilização CSS Personalizada sem tom cinza no fundo e Cards com Bordas Customizadas
 st.markdown("""
 <style>
     :root {
@@ -35,11 +35,11 @@ st.markdown("""
         background-color: #FFFFFF !important;
     }
     
-    /* Banner do Cabeçalho */
+    /* Cabeçalho do Banner */
     .main-header {
         background: linear-gradient(135deg, #5C061C 0%, #3D0412 100%);
         color: white;
-        padding: 18px 25px;
+        padding: 16px 24px;
         border-radius: 10px;
         margin-bottom: 25px;
         border-bottom: 5px solid #E65100;
@@ -49,41 +49,41 @@ st.markdown("""
         gap: 20px;
     }
 
-    /* Cards Indicadores Customizados */
+    /* Cards de Indicadores com Design Executivo e Bordas Institucionais */
     .metric-card {
         background-color: #FFFFFF;
         border: 1px solid #E2E8F0;
-        border-top: 4px solid #5C061C;
-        border-bottom: 2px solid #E65100;
+        border-top: 5px solid #5C061C;
+        border-bottom: 3px solid #E65100;
         border-radius: 10px;
-        padding: 16px 20px;
+        padding: 18px 15px;
         text-align: center;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        box-shadow: 0 4px 10px rgba(92, 6, 28, 0.06);
         transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
 
     .metric-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 12px -1px rgba(92, 6, 28, 0.12);
+        transform: translateY(-3px);
+        box-shadow: 0 8px 16px rgba(92, 6, 28, 0.12);
     }
 
     .metric-title {
-        color: #64748B;
-        font-size: 0.85rem;
+        color: #5C061C;
+        font-size: 0.82rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.5px;
+        letter-spacing: 0.6px;
         margin-bottom: 8px;
     }
 
     .metric-value {
-        color: #5C061C;
-        font-size: 2.1rem;
+        color: #E65100;
+        font-size: 2.2rem;
         font-weight: 800;
         line-height: 1;
     }
 
-    /* Estilização da Tabela de Matriz Diária */
+    /* Tabela da Matriz Diária */
     .gantt-matrix-container {
         overflow-x: auto;
         background-color: #FFFFFF;
@@ -131,7 +131,7 @@ st.markdown("""
         background-color: #FFFFFF;
     }
 
-    /* Cores das Células */
+    /* Cores das Células da Matriz */
     .cell-allocated {
         background-color: #2E7D32 !important; /* VERDE (Titular) */
         color: white !important;
@@ -282,11 +282,11 @@ def verificar_disponibilidade_tst(tst_nome, dt_inicio_str, dt_fim_str):
     conn.close()
     return not (em_ferias or em_alocacao)
 
-# Cabeçalho com a Logo em Base64
+# Cabeçalho com Logo Vetorial em Base64
 col_header1, col_header2 = st.columns([1, 4])
 with col_header1:
     if LOGO_BASE64:
-        st.markdown(f'<img src="data:image/png;base64,{LOGO_BASE64}" style="max-height: 80px; width: auto; object-fit: contain;">', unsafe_allow_html=True)
+        st.markdown(f'<img src="data:image/png;base64,{LOGO_BASE64}" style="height: 75px; width: auto; object-fit: contain;">', unsafe_allow_html=True)
     else:
         st.markdown("<h2 style='color:#5C061C; margin:0; font-weight:800;'>CHAMMAS</h2>", unsafe_allow_html=True)
 
@@ -310,7 +310,7 @@ df_projetos = run_query("SELECT id, nome FROM projetos")['nome'].tolist()
 df_alocacoes = run_query("SELECT * FROM alocacoes")
 df_ferias = run_query("SELECT * FROM ferias")
 
-# Indicadores em Cards Customizados (Design Elegante e Bordas Institucionais)
+# Indicadores em Cards Executivos
 col1, col2, col3, col4, col5 = st.columns(5)
 total_tsts = len(df_tsts)
 tsts_alocados = df_alocacoes['tst'].nunique() if not df_alocacoes.empty else 0
