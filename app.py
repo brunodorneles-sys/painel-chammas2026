@@ -4,18 +4,25 @@ import sqlite3
 from datetime import datetime, date, timedelta
 import calendar
 import os
+import base64
 
-# Caminho para o logotipo oficial enviado
-LOGO_PATH = "CHMMS_icone-33.png" if os.path.exists("CHMMS_icone-33.png") else None
+# Função para converter a logo vetorial em Base64 para exibição direta
+def get_base64_image(image_path):
+    if os.path.exists(image_path):
+        with open(image_path, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode('utf-8')
+    return None
 
-# Configuração da página (Favicon / Aba do navegador)
+LOGO_BASE64 = get_base64_image("CHMMS_icone-33.png")
+
+# Configuração da página
 st.set_page_config(
     page_title="Chammas Engenharia - Gestão de Recursos SSMA",
-    page_icon=LOGO_PATH if LOGO_PATH else "🏗️",
+    page_icon="CHMMS_icone-33.png" if os.path.exists("CHMMS_icone-33.png") else "🏗️",
     layout="wide"
 )
 
-# Estilização CSS personalizada (Fundo Branco Limpo sem tom cinza)
+# Estilização CSS personalizada (Design limpo + Cards executivos com bordas institucionais)
 st.markdown("""
 <style>
     :root {
@@ -28,30 +35,52 @@ st.markdown("""
         background-color: #FFFFFF !important;
     }
     
+    /* Banner do Cabeçalho */
     .main-header {
         background: linear-gradient(135deg, #5C061C 0%, #3D0412 100%);
         color: white;
-        padding: 15px 25px;
-        border-radius: 8px;
+        padding: 18px 25px;
+        border-radius: 10px;
         margin-bottom: 25px;
-        border-bottom: 4px solid #E65100;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.08);
+        border-bottom: 5px solid #E65100;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.12);
         display: flex;
         align-items: center;
-        justify-content: space-between;
+        gap: 20px;
     }
 
-    .stButton>button {
-        background-color: #E65100;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        font-weight: bold;
+    /* Cards Indicadores Customizados */
+    .metric-card {
+        background-color: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-top: 4px solid #5C061C;
+        border-bottom: 2px solid #E65100;
+        border-radius: 10px;
+        padding: 16px 20px;
+        text-align: center;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
 
-    .stButton>button:hover {
-        background-color: #BF360C;
-        color: white;
+    .metric-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 12px -1px rgba(92, 6, 28, 0.12);
+    }
+
+    .metric-title {
+        color: #64748B;
+        font-size: 0.85rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+    }
+
+    .metric-value {
+        color: #5C061C;
+        font-size: 2.1rem;
+        font-weight: 800;
+        line-height: 1;
     }
 
     /* Estilização da Tabela de Matriz Diária */
@@ -119,6 +148,19 @@ st.markdown("""
         background-color: #C62828 !important; /* VERMELHO (Férias) */
         color: white !important;
         font-weight: bold;
+    }
+
+    .stButton>button {
+        background-color: #E65100;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-weight: bold;
+    }
+
+    .stButton>button:hover {
+        background-color: #BF360C;
+        color: white;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -240,19 +282,21 @@ def verificar_disponibilidade_tst(tst_nome, dt_inicio_str, dt_fim_str):
     conn.close()
     return not (em_ferias or em_alocacao)
 
-# Cabeçalho sem fundo cinza
+# Cabeçalho com a Logo em Base64
 col_header1, col_header2 = st.columns([1, 4])
 with col_header1:
-    if LOGO_PATH:
-        st.image(LOGO_PATH, width=170)
+    if LOGO_BASE64:
+        st.markdown(f'<img src="data:image/png;base64,{LOGO_BASE64}" style="max-height: 80px; width: auto; object-fit: contain;">', unsafe_allow_html=True)
     else:
-        st.markdown("<h2 style='color:#5C061C; margin:0;'>CHAMMAS</h2>", unsafe_allow_html=True)
+        st.markdown("<h2 style='color:#5C061C; margin:0; font-weight:800;'>CHAMMAS</h2>", unsafe_allow_html=True)
 
 with col_header2:
     st.markdown("""
-        <div style='background: linear-gradient(135deg, #5C061C 0%, #3D0412 100%); padding: 12px 20px; border-radius: 8px; border-bottom: 4px solid #E65100; color: white;'>
-            <h2 style='margin:0; font-size: 1.6rem;'>CHAMMAS ENGENHARIA</h2>
-            <p style='margin:0; font-size: 0.9rem; opacity: 0.9; font-weight: 600;'>Gestão de Recursos SSMA</p>
+        <div class="main-header">
+            <div>
+                <h2 style="margin:0; font-size: 1.7rem; font-weight: 800; letter-spacing: 1px;">CHAMMAS ENGENHARIA</h2>
+                <p style="margin:0; font-size: 0.95rem; opacity: 0.9; font-weight: 600;">Gestão de Recursos SSMA</p>
+            </div>
         </div>
     """, unsafe_allow_html=True)
 
@@ -266,7 +310,7 @@ df_projetos = run_query("SELECT id, nome FROM projetos")['nome'].tolist()
 df_alocacoes = run_query("SELECT * FROM alocacoes")
 df_ferias = run_query("SELECT * FROM ferias")
 
-# Indicadores em Cards
+# Indicadores em Cards Customizados (Design Elegante e Bordas Institucionais)
 col1, col2, col3, col4, col5 = st.columns(5)
 total_tsts = len(df_tsts)
 tsts_alocados = df_alocacoes['tst'].nunique() if not df_alocacoes.empty else 0
@@ -274,13 +318,22 @@ tsts_ferias = df_ferias['tst'].nunique() if not df_ferias.empty else 0
 tsts_livres = max(0, total_tsts - (tsts_alocados + tsts_ferias))
 tsts_com_veiculo = df_alocacoes[df_alocacoes['veiculo'].notnull() & (df_alocacoes['veiculo'] != '') & (df_alocacoes['veiculo'] != 'Nenhum')]['tst'].nunique() if not df_alocacoes.empty else 0
 
-with col1: st.metric("Total TSTs", total_tsts)
-with col2: st.metric("Alocados em Projetos", tsts_alocados)
-with col3: st.metric("Em Férias", tsts_ferias)
-with col4: st.metric("Sem Alocação", tsts_livres)
-with col5: st.metric("Com Veículo", tsts_com_veiculo)
+with col1:
+    st.markdown(f'<div class="metric-card"><div class="metric-title">Total TSTs</div><div class="metric-value">{total_tsts}</div></div>', unsafe_allow_html=True)
 
-st.markdown("---")
+with col2:
+    st.markdown(f'<div class="metric-card"><div class="metric-title">Alocados em Projetos</div><div class="metric-value">{tsts_alocados}</div></div>', unsafe_allow_html=True)
+
+with col3:
+    st.markdown(f'<div class="metric-card"><div class="metric-title">Em Férias</div><div class="metric-value">{tsts_ferias}</div></div>', unsafe_allow_html=True)
+
+with col4:
+    st.markdown(f'<div class="metric-card"><div class="metric-title">Sem Alocação</div><div class="metric-value">{tsts_livres}</div></div>', unsafe_allow_html=True)
+
+with col5:
+    st.markdown(f'<div class="metric-card"><div class="metric-title">Com Veículo</div><div class="metric-value">{tsts_com_veiculo}</div></div>', unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
 
 menu = st.tabs(["📊 Visão Sistêmica", "➕ Nova Alocação", "🌴 Gestão de Férias", "⚙️ Cadastros Base", "📥 Exportar para Power BI"])
 
