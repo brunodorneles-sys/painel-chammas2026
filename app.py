@@ -3,6 +3,10 @@ import pandas as pd
 import sqlite3
 from datetime import datetime, date, timedelta, time
 import calendar
+import json
+import os
+import requests
+import base64
 
 # Configuração da página
 st.set_page_config(
@@ -11,7 +15,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização CSS Personalizada (Fundo Branco Limpo, Faixa Expandida e Cards Executivos)
+# Estilização CSS Personalizada
 st.markdown("""
 <style>
     :root {
@@ -24,7 +28,6 @@ st.markdown("""
         background-color: #FFFFFF !important;
     }
     
-    /* Banner do Cabeçalho Expandido (100% de largura) */
     .main-header {
         background: linear-gradient(135deg, #5C061C 0%, #3D0412 100%);
         color: white;
@@ -36,7 +39,6 @@ st.markdown("""
         width: 100%;
     }
 
-    /* Cards de Indicadores com Design Executivo e Bordas Institucionais */
     .metric-card {
         background-color: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -70,7 +72,6 @@ st.markdown("""
         line-height: 1;
     }
 
-    /* Tabela da Matriz Diária */
     .gantt-matrix-container {
         overflow-x: auto;
         background-color: #FFFFFF;
@@ -118,21 +119,20 @@ st.markdown("""
         background-color: #FFFFFF;
     }
 
-    /* Cores das Células da Matriz */
     .cell-allocated {
-        background-color: #2E7D32 !important; /* VERDE (Titular) */
+        background-color: #2E7D32 !important;
         color: white !important;
         font-weight: bold;
     }
 
     .cell-substitution {
-        background-color: #FBC02D !important; /* AMARELO (Substituto) */
+        background-color: #FBC02D !important;
         color: #212121 !important;
         font-weight: bold;
     }
 
     .cell-vacation {
-        background-color: #C62828 !important; /* VERMELHO (Férias) */
+        background-color: #C62828 !important;
         color: white !important;
         font-weight: bold;
     }
@@ -151,6 +151,69 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# Gestão e Sincronização de Dados com GitHub
+def persistir_backup_github(conteudo_json):
+    token = st.secrets.get("GITHUB_TOKEN", None)
+    repo = "brunodorneles-sys/painel-chammas2026"
+    path = "backup_dados.json"
+    
+    if not token:
+        # Se não houver token configurado em st.secrets, salva apenas localmente
+        with open("backup_dados.json", "w", encoding="utf-8") as f:
+            f.write(conteudo_json)
+        return False
+        
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    # Obter SHA do ficheiro se existir
+    res_get = requests.get(url, headers=headers)
+    sha = res_get.json().get("sha") if res_get.status_code == 200 else None
+    
+    dados_commit = {
+        "message": f"Backup automático SSMA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "content": base64.b64encode(conteudo_json.encode("utf-8")).decode("utf-8")
+    }
+    if sha:
+        dados_commit["sha"] = sha
+        
+    requests.put(url, headers=headers, json=dados_commit)
+    return True
+
+def gerar_backup_json():
+    conn = sqlite3.connect('chammas_gestao.db')
+    backup = {
+        "tsts": pd.read_sql_query("SELECT * FROM tsts", conn).to_dict(orient="records"),
+        "veiculos": pd.read_sql_query("SELECT * FROM veiculos", conn).to_dict(orient="records"),
+        "etilometros": pd.read_sql_query("SELECT * FROM etilometros", conn).to_dict(orient="records"),
+        "projetos": pd.read_sql_query("SELECT * FROM projetos", conn).to_dict(orient="records"),
+        "alocacoes": pd.read_sql_query("SELECT * FROM alocacoes", conn).to_dict(orient="records"),
+        "ferias": pd.read_sql_query("SELECT * FROM ferias", conn).to_dict(orient="records")
+    }
+    conn.close()
+    conteudo_json = json.dumps(backup, ensure_ascii=False, indent=2)
+    persistir_backup_github(conteudo_json)
+    return conteudo_json
+
+def restaurar_backup_json(dados_json):
+    conn = sqlite3.connect('chammas_gestao.db')
+    c = conn.cursor()
+    try:
+        dados = json.loads(dados_json) if isinstance(dados_json, str) else dados_json
+        for tabela in ["tsts", "veiculos", "etilometros", "projetos", "alocacoes", "ferias"]:
+            if tabela in dados and len(dados[tabela]) > 0:
+                df = pd.DataFrame(dados[tabela])
+                df.to_sql(tabela, conn, if_exists="replace", index=False)
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        conn.close()
+        return False
 
 def init_db():
     conn = sqlite3.connect('chammas_gestao.db')
@@ -183,17 +246,22 @@ def init_db():
     
     c.execute("SELECT COUNT(*) FROM tsts")
     if c.fetchone()[0] == 0:
-        tsts_iniciais = [
-            'Aline Alcantara Linhares', 'Cristiano Henrique Resende', 'Daniela Valesca Martins Silva',
-            'Deise Cristina Santos Moreira', 'Gustavo Brito Lopes da Silva', 'Helber Alves Silva',
-            'James Marques Lacerda', 'João Vitor de Souza', 'Natália Guimarães', 'Pedro Henrique Ferreira Santos',
-            'Richardson Bernardo Fernandes', 'Sérgio Felix de Souza', 'Weryks Martins da Silva',
-            'Aline Cristina Souza Ferreira', 'Jacqueline Cristina Pinto Barbosa', 'Marcirene Sales Ferreira',
-            'Manoel Tagino dos Santos Junior', 'Charles Franklin de Faria', 'Jessica Arlene Beato',
-            'Ricardo Duarte Batista', 'Fernanda de Oliveira Santos', 'Wania Marcia De Rezende',
-            'Janaina Aparecida dos Santos', 'Vinicius Pinheiro de Oliveira'
-        ]
-        c.executemany("INSERT INTO tsts (nome) VALUES (?)", [(t,) for t in tsts_iniciais])
+        # Tenta restaurar do ficheiro de backup se existir no repositório
+        if os.path.exists("backup_dados.json"):
+            with open("backup_dados.json", "r", encoding="utf-8") as f:
+                restaurar_backup_json(f.read())
+        else:
+            tsts_iniciais = [
+                'Aline Alcantara Linhares', 'Cristiano Henrique Resende', 'Daniela Valesca Martins Silva',
+                'Deise Cristina Santos Moreira', 'Gustavo Brito Lopes da Silva', 'Helber Alves Silva',
+                'James Marques Lacerda', 'João Vitor de Souza', 'Natália Guimarães', 'Pedro Henrique Ferreira Santos',
+                'Richardson Bernardo Fernandes', 'Sérgio Felix de Souza', 'Weryks Martins da Silva',
+                'Aline Cristina Souza Ferreira', 'Jacqueline Cristina Pinto Barbosa', 'Marcirene Sales Ferreira',
+                'Manoel Tagino dos Santos Junior', 'Charles Franklin de Faria', 'Jessica Arlene Beato',
+                'Ricardo Duarte Batista', 'Fernanda de Oliveira Santos', 'Wania Marcia De Rezende',
+                'Janaina Aparecida dos Santos', 'Vinicius Pinheiro de Oliveira'
+            ]
+            c.executemany("INSERT INTO tsts (nome) VALUES (?)", [(t,) for t in tsts_iniciais])
 
     c.execute("SELECT COUNT(*) FROM veiculos")
     if c.fetchone()[0] == 0:
@@ -241,19 +309,16 @@ def execute_db(query, params=()):
     c.execute(query, params)
     conn.commit()
     conn.close()
+    gerar_backup_json()
 
-# Função de Virada Automática Diária às 06:00 a.m. UTC-3
 def processar_auto_alocacao_diaria():
     agora = datetime.now()
     hoje = agora.date()
     ontem = hoje - timedelta(days=1)
     
-    # Executa a virada diária caso a hora atual seja 06:00 a.m. ou mais tarde
     if agora.time() >= time(6, 0):
         conn = sqlite3.connect('chammas_gestao.db')
         c = conn.cursor()
-        
-        # Seleciona alocações ativas no dia anterior
         c.execute("""
             SELECT projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao 
             FROM alocacoes 
@@ -261,30 +326,28 @@ def processar_auto_alocacao_diaria():
         """, (str(ontem), str(ontem)))
         alocacoes_ontem = c.fetchall()
         
+        alterou = False
         for aloc in alocacoes_ontem:
             proj, tst_nom, veic, etil, d_ini, d_fim, is_sub, obs = aloc
-            
-            # Se a data de término for hoje ou posterior, estende para o dia atual se não existir registro
             if d_fim >= str(hoje):
                 c.execute("SELECT COUNT(*) FROM alocacoes WHERE tst = ? AND data_inicio <= ? AND data_fim >= ?", (tst_nom, str(hoje), str(hoje)))
                 ja_alocado_hoje = c.fetchone()[0] > 0
-                
                 if not ja_alocado_hoje:
                     c.execute("""
                         INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (proj, tst_nom, veic, etil, str(hoje), d_fim, is_sub, f"Propagado automaticamente das 06h: {obs}"))
-        
+                    """, (proj, tst_nom, veic, etil, str(hoje), d_fim, is_sub, f"Propagado automaticamente: {obs}"))
+                    alterou = True
         conn.commit()
         conn.close()
+        if alterou:
+            gerar_backup_json()
 
-# Executa a verificação/automação diária
 processar_auto_alocacao_diaria()
 
 def verificar_disponibilidade_tst(tst_nome, dt_inicio_str, dt_fim_str):
     conn = sqlite3.connect('chammas_gestao.db')
     c = conn.cursor()
-    
     c.execute("""
         SELECT COUNT(*) FROM ferias 
         WHERE tst = ? AND (
@@ -308,7 +371,7 @@ def verificar_disponibilidade_tst(tst_nome, dt_inicio_str, dt_fim_str):
     conn.close()
     return not (em_ferias or em_alocacao)
 
-# Cabeçalho com Faixa Expandida
+# Cabeçalho
 st.markdown("""
 <div class="main-header">
     <h1 style="margin:0; font-size: 1.9rem; font-weight: 800; letter-spacing: 1.5px;">CHAMMAS ENGENHARIA</h1>
@@ -324,7 +387,7 @@ df_projetos = run_query("SELECT id, nome FROM projetos")['nome'].tolist()
 df_alocacoes = run_query("SELECT * FROM alocacoes")
 df_ferias = run_query("SELECT * FROM ferias")
 
-# Indicadores em Cards Executivos
+# Cards Indicadores
 col1, col2, col3, col4, col5 = st.columns(5)
 total_tsts = len(df_tsts)
 tsts_alocados = df_alocacoes['tst'].nunique() if not df_alocacoes.empty else 0
@@ -334,24 +397,20 @@ tsts_com_veiculo = df_alocacoes[df_alocacoes['veiculo'].notnull() & (df_alocacoe
 
 with col1:
     st.markdown(f'<div class="metric-card"><div class="metric-title">Total TSTs</div><div class="metric-value">{total_tsts}</div></div>', unsafe_allow_html=True)
-
 with col2:
     st.markdown(f'<div class="metric-card"><div class="metric-title">Alocados em Projetos</div><div class="metric-value">{tsts_alocados}</div></div>', unsafe_allow_html=True)
-
 with col3:
     st.markdown(f'<div class="metric-card"><div class="metric-title">Em Férias</div><div class="metric-value">{tsts_ferias}</div></div>', unsafe_allow_html=True)
-
 with col4:
     st.markdown(f'<div class="metric-card"><div class="metric-title">Sem Alocação</div><div class="metric-value">{tsts_livres}</div></div>', unsafe_allow_html=True)
-
 with col5:
     st.markdown(f'<div class="metric-card"><div class="metric-title">Com Veículo</div><div class="metric-value">{tsts_com_veiculo}</div></div>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-menu = st.tabs(["📊 Visão Sistêmica", "➕ Nova Alocação", "🌴 Gestão de Férias", "⚙️ Cadastros Base", "📥 Exportar para Power BI"])
+menu = st.tabs(["📊 Visão Sistêmica", "➕ Nova Alocação", "🌴 Gestão de Férias", "⚙️ Cadastros Base", "💾 Cópia de Segurança & Restauro", "📥 Exportar para Power BI"])
 
-# TAB 1: VISÃO SISTÊMICA (GESTÃO DIÁRIA DE RECURSOS HUMANOS)
+# TAB 1: VISÃO SISTÊMICA
 with menu[0]:
     st.subheader("Gestão diária de Recursos Humanos")
     st.caption("ℹ️ *A virada diária ocorre automaticamente às 06:00 a.m. (UTC-3), mantendo as alocações vigentes do dia anterior.*")
@@ -370,19 +429,15 @@ with menu[0]:
             
         html_lines = []
         html_lines.append('<div class="gantt-matrix-container"><table class="gantt-table">')
-        
-        # Linha 1: Meses
         html_lines.append('<thead><tr><th rowspan="2">Nº</th><th rowspan="2">Colaborador (TST)</th><th rowspan="2">Projeto Atual</th>')
         for m_nome, count_dias in meses_grupos.items():
             html_lines.append(f'<th colspan="{count_dias}" class="header-month">{m_nome}</th>')
         html_lines.append('</tr><tr>')
         
-        # Linha 2: Dias
         for d in datas_lista:
             html_lines.append(f'<th class="header-day">{d.day}</th>')
         html_lines.append('</tr></thead><tbody>')
         
-        # Preenchimento das Linhas
         for idx, tst_nome in enumerate(df_tsts, start=1):
             aloc_tst = df_alocacoes[df_alocacoes['tst'] == tst_nome] if not df_alocacoes.empty else pd.DataFrame()
             unidade_nome = aloc_tst['projeto'].iloc[-1] if not aloc_tst.empty else "-"
@@ -394,14 +449,12 @@ with menu[0]:
                 cell_class = ""
                 cell_text = ""
                 
-                # Férias (VERMELHO)
                 if not df_ferias.empty:
                     ferias_act = df_ferias[(df_ferias['tst'] == tst_nome) & (df_ferias['data_inicio'] <= data_curr_str) & (df_ferias['data_fim'] >= data_curr_str)]
                     if not ferias_act.empty:
                         cell_class = "cell-vacation"
                         cell_text = "F"
                 
-                # Alocação (VERDE ou AMARELO)
                 if not cell_class and not df_alocacoes.empty:
                     aloc_act = df_alocacoes[(df_alocacoes['tst'] == tst_nome) & (df_alocacoes['data_inicio'] <= data_curr_str) & (df_alocacoes['data_fim'] >= data_curr_str)]
                     if not aloc_act.empty:
@@ -419,7 +472,6 @@ with menu[0]:
         html_lines.append('</tbody></table></div>')
         st.markdown("".join(html_lines), unsafe_allow_html=True)
         
-        # Legenda
         st.markdown("""
         <div style="margin-top: 10px; margin-bottom: 25px; display: flex; gap: 20px; font-size: 13px;">
             <div><span style="background-color: #2E7D32; color: white; padding: 2px 8px; border-radius: 3px; font-weight: bold;">X</span> Alocação Titular (Verde)</div>
@@ -469,10 +521,10 @@ with menu[1]:
                 "INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao) VALUES (?,?,?,?,?,?,?,?)",
                 (projeto_sel, tst_sel, veiculo_sel, etilometro_sel, str(dt_inicio), str(dt_fim), 1 if is_sub else 0, obs)
             )
-            st.success("Alocação registrada com sucesso!")
+            st.success("Alocação registrada e cópia de segurança atualizada!")
             st.rerun()
 
-# TAB 3: GESTÃO DE FÉRIAS (REGISTRO AUTOMÁTICO DE COBERTURA DO SUBSTITUTO)
+# TAB 3: GESTÃO DE FÉRIAS
 with menu[2]:
     st.subheader("Lançar Férias de TST")
     with st.form("form_ferias"):
@@ -609,8 +661,38 @@ with menu[3]:
                 execute_db("DELETE FROM etilometros WHERE id = ?", (r['id'],))
                 st.rerun()
 
-# TAB 5: POWER BI
+# TAB 5: BACKUP E RESTAURO
 with menu[4]:
+    st.subheader("💾 Cópia de Segurança e Persistência de Dados")
+    st.write("Todas as alterações realizadas no painel são salvas automaticamente em backup JSON.")
+    
+    col_b1, col_b2 = st.columns(2)
+    with col_b1:
+        st.markdown("#### Descarregar Cópia de Segurança")
+        st.write("Faça o descarregamento do ficheiro JSON atual com todos os registos (alocações, férias e cadastros).")
+        conteudo_bkp = gerar_backup_json()
+        st.download_button(
+            label="📥 Descarregar backup_dados.json",
+            data=conteudo_bkp,
+            file_name=f"chammas_backup_{date.today()}.json",
+            mime="application/json"
+        )
+        
+    with col_b2:
+        st.markdown("#### Restaurar Base de Dados")
+        st.write("Caso a aplicação reinicie ou pretenda restaurar dados anteriores, carregue o ficheiro de backup:")
+        arquivo_upload = st.file_uploader("Selecione o ficheiro de cópia de segurança (.json)", type=["json"])
+        if arquivo_upload is not None:
+            if st.button("Restaurar Dados Agora"):
+                sucesso = restaurar_backup_json(arquivo_upload.read().decode('utf-8'))
+                if sucesso:
+                    st.success("✅ Base de dados restaurada com sucesso!")
+                    st.rerun()
+                else:
+                    st.error("❌ Erro ao restaurar os dados do ficheiro.")
+
+# TAB 6: POWER BI
+with menu[5]:
     st.subheader("Exportação de Dados para Power BI")
     st.write("Baixe o arquivo CSV da tabela fato para conectar no seu relatório do Power BI.")
     
