@@ -1,12 +1,7 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
 from datetime import datetime, date, timedelta, time
 import calendar
-import json
-import os
-import requests
-import base64
 
 # Configuração da página
 st.set_page_config(
@@ -15,7 +10,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Estilização CSS Personalizada
+# Estilização CSS Personalizada (Fundo Branco Limpo, Faixa Expandida e Cards Executivos)
 st.markdown("""
 <style>
     :root {
@@ -28,6 +23,7 @@ st.markdown("""
         background-color: #FFFFFF !important;
     }
     
+    /* Banner do Cabeçalho Expandido (100% de largura) */
     .main-header {
         background: linear-gradient(135deg, #5C061C 0%, #3D0412 100%);
         color: white;
@@ -39,6 +35,7 @@ st.markdown("""
         width: 100%;
     }
 
+    /* Cards de Indicadores com Design Executivo e Bordas Institucionais */
     .metric-card {
         background-color: #FFFFFF;
         border: 1px solid #E2E8F0;
@@ -72,6 +69,7 @@ st.markdown("""
         line-height: 1;
     }
 
+    /* Tabela da Matriz Diária */
     .gantt-matrix-container {
         overflow-x: auto;
         background-color: #FFFFFF;
@@ -152,224 +150,99 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Gestão e Sincronização de Dados com GitHub
-def persistir_backup_github(conteudo_json):
-    token = st.secrets.get("GITHUB_TOKEN", None)
-    repo = "brunodorneles-sys/painel-chammas2026"
-    path = "backup_dados.json"
-    
-    if not token:
-        # Se não houver token configurado em st.secrets, salva apenas localmente
-        with open("backup_dados.json", "w", encoding="utf-8") as f:
-            f.write(conteudo_json)
-        return False
-        
-    url = f"https://api.github.com/repos/{repo}/contents/{path}"
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    
-    # Obter SHA do ficheiro se existir
-    res_get = requests.get(url, headers=headers)
-    sha = res_get.json().get("sha") if res_get.status_code == 200 else None
-    
-    dados_commit = {
-        "message": f"Backup automático SSMA: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "content": base64.b64encode(conteudo_json.encode("utf-8")).decode("utf-8")
-    }
-    if sha:
-        dados_commit["sha"] = sha
-        
-    requests.put(url, headers=headers, json=dados_commit)
-    return True
+# GESTÃO DE PERSISTÊNCIA EM PLANILHA / MEMÓRIA LOCAL
+SPREADSHEET_URL = st.secrets.get("SPREADSHEET_URL", None)
 
-def gerar_backup_json():
-    conn = sqlite3.connect('chammas_gestao.db')
-    backup = {
-        "tsts": pd.read_sql_query("SELECT * FROM tsts", conn).to_dict(orient="records"),
-        "veiculos": pd.read_sql_query("SELECT * FROM veiculos", conn).to_dict(orient="records"),
-        "etilometros": pd.read_sql_query("SELECT * FROM etilometros", conn).to_dict(orient="records"),
-        "projetos": pd.read_sql_query("SELECT * FROM projetos", conn).to_dict(orient="records"),
-        "alocacoes": pd.read_sql_query("SELECT * FROM alocacoes", conn).to_dict(orient="records"),
-        "ferias": pd.read_sql_query("SELECT * FROM ferias", conn).to_dict(orient="records")
-    }
-    conn.close()
-    conteudo_json = json.dumps(backup, ensure_ascii=False, indent=2)
-    persistir_backup_github(conteudo_json)
-    return conteudo_json
+def carregar_tabela(nome_aba, colunas_default, dados_iniciais=None):
+    if SPREADSHEET_URL:
+        try:
+            # Extrair chave da planilha
+            sheet_id = SPREADSHEET_URL.split("/d/")[1].split("/")[0]
+            csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={nome_aba}"
+            df = pd.read_csv(csv_url)
+            if not df.empty:
+                return df
+        except Exception:
+            pass
 
-def restaurar_backup_json(dados_json):
-    conn = sqlite3.connect('chammas_gestao.db')
-    c = conn.cursor()
-    try:
-        dados = json.loads(dados_json) if isinstance(dados_json, str) else dados_json
-        for tabela in ["tsts", "veiculos", "etilometros", "projetos", "alocacoes", "ferias"]:
-            if tabela in dados and len(dados[tabela]) > 0:
-                df = pd.DataFrame(dados[tabela])
-                df.to_sql(tabela, conn, if_exists="replace", index=False)
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        conn.close()
-        return False
-
-def init_db():
-    conn = sqlite3.connect('chammas_gestao.db')
-    c = conn.cursor()
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS tsts (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS veiculos (id INTEGER PRIMARY KEY AUTOINCREMENT, placa TEXT UNIQUE)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS etilometros (id INTEGER PRIMARY KEY AUTOINCREMENT, codigo TEXT UNIQUE)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS projetos (id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT UNIQUE)''')
-    
-    c.execute('''CREATE TABLE IF NOT EXISTS alocacoes (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    projeto TEXT,
-                    tst TEXT,
-                    veiculo TEXT,
-                    etilometro TEXT,
-                    data_inicio DATE,
-                    data_fim DATE,
-                    is_substituicao INTEGER,
-                    observacao TEXT
-                )''')
-                
-    c.execute('''CREATE TABLE IF NOT EXISTS ferias (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    tst TEXT,
-                    substituto TEXT,
-                    data_inicio DATE,
-                    data_fim DATE
-                )''')
-    
-    c.execute("SELECT COUNT(*) FROM tsts")
-    if c.fetchone()[0] == 0:
-        # Tenta restaurar do ficheiro de backup se existir no repositório
-        if os.path.exists("backup_dados.json"):
-            with open("backup_dados.json", "r", encoding="utf-8") as f:
-                restaurar_backup_json(f.read())
+    # Fallback em memória na sessão
+    chave = f"tbl_{nome_aba}"
+    if chave not in st.session_state:
+        if dados_iniciais is not None:
+            st.session_state[chave] = pd.DataFrame(dados_iniciais)
         else:
-            tsts_iniciais = [
-                'Aline Alcantara Linhares', 'Cristiano Henrique Resende', 'Daniela Valesca Martins Silva',
-                'Deise Cristina Santos Moreira', 'Gustavo Brito Lopes da Silva', 'Helber Alves Silva',
-                'James Marques Lacerda', 'João Vitor de Souza', 'Natália Guimarães', 'Pedro Henrique Ferreira Santos',
-                'Richardson Bernardo Fernandes', 'Sérgio Felix de Souza', 'Weryks Martins da Silva',
-                'Aline Cristina Souza Ferreira', 'Jacqueline Cristina Pinto Barbosa', 'Marcirene Sales Ferreira',
-                'Manoel Tagino dos Santos Junior', 'Charles Franklin de Faria', 'Jessica Arlene Beato',
-                'Ricardo Duarte Batista', 'Fernanda de Oliveira Santos', 'Wania Marcia De Rezende',
-                'Janaina Aparecida dos Santos', 'Vinicius Pinheiro de Oliveira'
-            ]
-            c.executemany("INSERT INTO tsts (nome) VALUES (?)", [(t,) for t in tsts_iniciais])
+            st.session_state[chave] = pd.DataFrame(columns=colunas_default)
+    return st.session_state[chave]
 
-    c.execute("SELECT COUNT(*) FROM veiculos")
-    if c.fetchone()[0] == 0:
-        veiculos_iniciais = [
-            'SIB7B06','RUA5H43','SJI8H13','SYJ0J36','TCO9C94','TXY3F21','QMZ1D81','RTF6B55','RUW6A70','TCG3B90',
-            'TDT9H59','TDU3E72','TDU3E73','TDU3E74','TDU3E75','TEE4C20','TEE4C33','UDG1J25','TEC6E42','TEE4B95',
-            'TEE4C11','TEE4C28','TEE6B91','TXL6B90','TXY7G94','TZF9D38','TEI7D22','TEI7D35','TEI7D36','TES7B26',
-            'SYR2J90','TDV9A59','TDW1J44','TEE4C05','TEI7D06','TEI7D18','TEI7D31','TEW0G98','TCK4J56','TDV9A61',
-            'TEE4C15','SIX0C67','TDV9A53','TEE4C06','TXS0G24','TEE4C27','TXO0J84','RVT4E66','TDV9A52','TEI7D17',
-            'RUT6I73','TDO8H14','TDV9A51','TEI7D34','TEO4G56','TEO4G58','TEO4G59','TXO5I56','SIR0G95','TEE6B90',
-            'SYS3J92','TEI7D11','TEI7D20','TEI7D21','TEI7D26','TCE7H36','TCE8G30','TDV9A56','PZA0492','RNT6B86',
-            'RUW6B08','RVU9F50','SIF7D10','SYV9F52','TCI8J28','TCT3J87','TDU8I87','TDU8I88','TDU8I89','TDU8I90',
-            'TDV9A54','TDV9A57','TDV9A58','TDV9A60','TDW5A05','TEB4C38','TEI7D38','TYV5I62','TZW6H02','UVS4I29'
-        ]
-        c.executemany("INSERT INTO veiculos (placa) VALUES (?)", [(v,) for v in veiculos_iniciais])
+def salvar_tabela(nome_aba, df):
+    chave = f"tbl_{nome_aba}"
+    st.session_state[chave] = df.copy()
 
-    c.execute("SELECT COUNT(*) FROM etilometros")
-    if c.fetchone()[0] == 0:
-        etilometros_iniciais = ['18302', '18303', '18304', '18305', '18306', '18307', '19407', '19408']
-        c.executemany("INSERT INTO etilometros (codigo) VALUES (?)", [(e,) for e in etilometros_iniciais])
+# Dados Iniciais Base
+tsts_padrao = sorted([
+    'Aline Alcantara Linhares', 'Cristiano Henrique Resende', 'Daniela Valesca Martins Silva',
+    'Deise Cristina Santos Moreira', 'Gustavo Brito Lopes da Silva', 'Helber Alves Silva',
+    'James Marques Lacerda', 'João Vitor de Souza', 'Natália Guimarães', 'Pedro Henrique Ferreira Santos',
+    'Richardson Bernardo Fernandes', 'Sérgio Felix de Souza', 'Weryks Martins da Silva',
+    'Aline Cristina Souza Ferreira', 'Jacqueline Cristina Pinto Barbosa', 'Marcirene Sales Ferreira',
+    'Manoel Tagino dos Santos Junior', 'Charles Franklin de Faria', 'Jessica Arlene Beato',
+    'Ricardo Duarte Batista', 'Fernanda de Oliveira Santos', 'Wania Marcia De Rezende',
+    'Janaina Aparecida dos Santos', 'Vinicius Pinheiro de Oliveira'
+])
 
-    c.execute("SELECT COUNT(*) FROM projetos")
-    if c.fetchone()[0] == 0:
-        projetos_iniciais = [
-            'Gerdau - 5955', 'Vale Brucutu - 5930', 'Gerdau - 5919', 'Vale Norte - 5426', 
-            'St. George - 6874', 'Jaguar - 6132', 'Vale - 6300', 'Vale Itabira - 5907', 
-            'Kinross - 5852', 'Vale Água Limpa - 5930', 'CBMM - 6150', 'Gerdau - 6677'
-        ]
-        c.executemany("INSERT INTO projetos (nome) VALUES (?)", [(p,) for p in projetos_iniciais])
+veiculos_padrao = sorted([
+    'SIB7B06','RUA5H43','SJI8H13','SYJ0J36','TCO9C94','TXY3F21','QMZ1D81','RTF6B55','RUW6A70','TCG3B90',
+    'TDT9H59','TDU3E72','TDU3E73','TDU3E74','TDU3E75','TEE4C20','TEE4C33','UDG1J25','TEC6E42','TEE4B95',
+    'TEE4C11','TEE4C28','TEE6B91','TXL6B90','TXY7G94','TZF9D38','TEI7D22','TEI7D35','TEI7D36','TES7B26',
+    'SYR2J90','TDV9A59','TDW1J44','TEE4C05','TEI7D06','TEI7D18','TEI7D31','TEW0G98','TCK4J56','TDV9A61',
+    'TEE4C15','SIX0C67','TDV9A53','TEE4C06','TXS0G24','TEE4C27','TXO0J84','RVT4E66','TDV9A52','TEI7D17',
+    'RUT6I73','TDO8H14','TDV9A51','TEI7D34','TEO4G56','TEO4G58','TEO4G59','TXO5I56','SIR0G95','TEE6B90',
+    'SYS3J92','TEI7D11','TEI7D20','TEI7D21','TEI7D26','TCE7H36','TCE8G30','TDV9A56','PZA0492','RNT6B86',
+    'RUW6B08','RVU9F50','SIF7D10','SYV9F52','TCI8J28','TCT3J87','TDU8I87','TDU8I88','TDU8I89','TDU8I90',
+    'TDV9A54','TDV9A57','TDV9A58','TDV9A60','TDW5A05','TEB4C38','TEI7D38','TYV5I62','TZW6H02','UVS4I29'
+])
 
-    conn.commit()
-    conn.close()
+etilometros_padrao = sorted(['18302', '18303', '18304', '18305', '18306', '18307', '19407', '19408'])
+projetos_padrao = sorted([
+    'Gerdau - 5955', 'Vale Brucutu - 5930', 'Gerdau - 5919', 'Vale Norte - 5426', 
+    'St. George - 6874', 'Jaguar - 6132', 'Vale - 6300', 'Vale Itabira - 5907', 
+    'Kinross - 5852', 'Vale Água Limpa - 5930', 'CBMM - 6150', 'Gerdau - 6677'
+])
 
-init_db()
+# Carregamento persistente
+df_tsts_tbl = carregar_tabela("tsts", ["nome"], [{"nome": n} for n in tsts_padrao])
+df_veiculos_tbl = carregar_tabela("veiculos", ["placa"], [{"placa": p} for p in veiculos_padrao])
+df_etilometros_tbl = carregar_tabela("etilometros", ["codigo"], [{"codigo": c} for c in etilometros_padrao])
+df_projetos_tbl = carregar_tabela("projetos", ["nome"], [{"nome": p} for p in projetos_padrao])
 
-def run_query(query):
-    conn = sqlite3.connect('chammas_gestao.db')
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-    return df
+df_alocacoes = carregar_tabela("alocacoes", ["id", "projeto", "tst", "veiculo", "etilometro", "data_inicio", "data_fim", "is_substituicao", "observacao"])
+df_ferias = carregar_tabela("ferias", ["id", "tst", "substituto", "data_inicio", "data_fim"])
 
-def execute_db(query, params=()):
-    conn = sqlite3.connect('chammas_gestao.db')
-    c = conn.cursor()
-    c.execute(query, params)
-    conn.commit()
-    conn.close()
-    gerar_backup_json()
-
-def processar_auto_alocacao_diaria():
-    agora = datetime.now()
-    hoje = agora.date()
-    ontem = hoje - timedelta(days=1)
-    
-    if agora.time() >= time(6, 0):
-        conn = sqlite3.connect('chammas_gestao.db')
-        c = conn.cursor()
-        c.execute("""
-            SELECT projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao 
-            FROM alocacoes 
-            WHERE data_inicio <= ? AND data_fim >= ?
-        """, (str(ontem), str(ontem)))
-        alocacoes_ontem = c.fetchall()
-        
-        alterou = False
-        for aloc in alocacoes_ontem:
-            proj, tst_nom, veic, etil, d_ini, d_fim, is_sub, obs = aloc
-            if d_fim >= str(hoje):
-                c.execute("SELECT COUNT(*) FROM alocacoes WHERE tst = ? AND data_inicio <= ? AND data_fim >= ?", (tst_nom, str(hoje), str(hoje)))
-                ja_alocado_hoje = c.fetchone()[0] > 0
-                if not ja_alocado_hoje:
-                    c.execute("""
-                        INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (proj, tst_nom, veic, etil, str(hoje), d_fim, is_sub, f"Propagado automaticamente: {obs}"))
-                    alterou = True
-        conn.commit()
-        conn.close()
-        if alterou:
-            gerar_backup_json()
-
-processar_auto_alocacao_diaria()
+df_tsts = sorted(df_tsts_tbl['nome'].dropna().unique().tolist())
+df_veiculos = sorted(df_veiculos_tbl['placa'].dropna().unique().tolist())
+df_etilometros = sorted(df_etilometros_tbl['codigo'].dropna().unique().tolist())
+df_projetos = sorted(df_projetos_tbl['nome'].dropna().unique().tolist())
 
 def verificar_disponibilidade_tst(tst_nome, dt_inicio_str, dt_fim_str):
-    conn = sqlite3.connect('chammas_gestao.db')
-    c = conn.cursor()
-    c.execute("""
-        SELECT COUNT(*) FROM ferias 
-        WHERE tst = ? AND (
-            (data_inicio <= ? AND data_fim >= ?) OR
-            (data_inicio <= ? AND data_fim >= ?) OR
-            (? <= data_inicio AND ? >= data_fim)
-        )
-    """, (tst_nome, dt_inicio_str, dt_inicio_str, dt_fim_str, dt_fim_str, dt_inicio_str, dt_fim_str))
-    em_ferias = c.fetchone()[0] > 0
+    if not df_ferias.empty:
+        ferias_c = df_ferias[(df_ferias['tst'] == tst_nome) & (
+            ((df_ferias['data_inicio'] <= dt_inicio_str) & (df_ferias['data_fim'] >= dt_inicio_str)) |
+            ((df_ferias['data_inicio'] <= dt_fim_str) & (df_ferias['data_fim'] >= dt_fim_str)) |
+            ((dt_inicio_str <= df_ferias['data_inicio']) & (dt_fim_str >= df_ferias['data_fim']))
+        )]
+        if not ferias_c.empty:
+            return False
 
-    c.execute("""
-        SELECT COUNT(*) FROM alocacoes 
-        WHERE tst = ? AND (
-            (data_inicio <= ? AND data_fim >= ?) OR
-            (data_inicio <= ? AND data_fim >= ?) OR
-            (? <= data_inicio AND ? >= data_fim)
-        )
-    """, (tst_nome, dt_inicio_str, dt_inicio_str, dt_fim_str, dt_fim_str, dt_inicio_str, dt_fim_str))
-    em_alocacao = c.fetchone()[0] > 0
+    if not df_alocacoes.empty:
+        aloc_c = df_alocacoes[(df_alocacoes['tst'] == tst_nome) & (
+            ((df_alocacoes['data_inicio'] <= dt_inicio_str) & (df_alocacoes['data_fim'] >= dt_inicio_str)) |
+            ((df_alocacoes['data_inicio'] <= dt_fim_str) & (df_alocacoes['data_fim'] >= dt_fim_str)) |
+            ((dt_inicio_str <= df_alocacoes['data_inicio']) & (dt_fim_str >= df_alocacoes['data_fim']))
+        )]
+        if not aloc_c.empty:
+            return False
 
-    conn.close()
-    return not (em_ferias or em_alocacao)
+    return True
 
 # Cabeçalho
 st.markdown("""
@@ -379,15 +252,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-df_tsts = run_query("SELECT id, nome FROM tsts")['nome'].tolist()
-df_veiculos = run_query("SELECT id, placa FROM veiculos")['placa'].tolist()
-df_etilometros = run_query("SELECT id, codigo FROM etilometros")['codigo'].tolist()
-df_projetos = run_query("SELECT id, nome FROM projetos")['nome'].tolist()
-
-df_alocacoes = run_query("SELECT * FROM alocacoes")
-df_ferias = run_query("SELECT * FROM ferias")
-
-# Cards Indicadores
+# Indicadores em Cards
 col1, col2, col3, col4, col5 = st.columns(5)
 total_tsts = len(df_tsts)
 tsts_alocados = df_alocacoes['tst'].nunique() if not df_alocacoes.empty else 0
@@ -395,25 +260,19 @@ tsts_ferias = df_ferias['tst'].nunique() if not df_ferias.empty else 0
 tsts_livres = max(0, total_tsts - (tsts_alocados + tsts_ferias))
 tsts_com_veiculo = df_alocacoes[df_alocacoes['veiculo'].notnull() & (df_alocacoes['veiculo'] != '') & (df_alocacoes['veiculo'] != 'Nenhum')]['tst'].nunique() if not df_alocacoes.empty else 0
 
-with col1:
-    st.markdown(f'<div class="metric-card"><div class="metric-title">Total TSTs</div><div class="metric-value">{total_tsts}</div></div>', unsafe_allow_html=True)
-with col2:
-    st.markdown(f'<div class="metric-card"><div class="metric-title">Alocados em Projetos</div><div class="metric-value">{tsts_alocados}</div></div>', unsafe_allow_html=True)
-with col3:
-    st.markdown(f'<div class="metric-card"><div class="metric-title">Em Férias</div><div class="metric-value">{tsts_ferias}</div></div>', unsafe_allow_html=True)
-with col4:
-    st.markdown(f'<div class="metric-card"><div class="metric-title">Sem Alocação</div><div class="metric-value">{tsts_livres}</div></div>', unsafe_allow_html=True)
-with col5:
-    st.markdown(f'<div class="metric-card"><div class="metric-title">Com Veículo</div><div class="metric-value">{tsts_com_veiculo}</div></div>', unsafe_allow_html=True)
+with col1: st.markdown(f'<div class="metric-card"><div class="metric-title">Total TSTs</div><div class="metric-value">{total_tsts}</div></div>', unsafe_allow_html=True)
+with col2: st.markdown(f'<div class="metric-card"><div class="metric-title">Alocados em Projetos</div><div class="metric-value">{tsts_alocados}</div></div>', unsafe_allow_html=True)
+with col3: st.markdown(f'<div class="metric-card"><div class="metric-title">Em Férias</div><div class="metric-value">{tsts_ferias}</div></div>', unsafe_allow_html=True)
+with col4: st.markdown(f'<div class="metric-card"><div class="metric-title">Sem Alocação</div><div class="metric-value">{tsts_livres}</div></div>', unsafe_allow_html=True)
+with col5: st.markdown(f'<div class="metric-card"><div class="metric-title">Com Veículo</div><div class="metric-value">{tsts_com_veiculo}</div></div>', unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-menu = st.tabs(["📊 Visão Sistêmica", "➕ Nova Alocação", "🌴 Gestão de Férias", "⚙️ Cadastros Base", "💾 Cópia de Segurança & Restauro", "📥 Exportar para Power BI"])
+menu = st.tabs(["📊 Visão Sistêmica", "➕ Nova Alocação", "🌴 Gestão de Férias", "⚙️ Cadastros Base", "📥 Exportar para Power BI"])
 
-# TAB 1: VISÃO SISTÊMICA
+# TAB 1: VISÃO SISTÊMICA (SEMPRE EM ORDEM ALFABÉTICA)
 with menu[0]:
     st.subheader("Gestão diária de Recursos Humanos")
-    st.caption("ℹ️ *A virada diária ocorre automaticamente às 06:00 a.m. (UTC-3), mantendo as alocações vigentes do dia anterior.*")
     
     col_d1, col_d2 = st.columns(2)
     dt_inicio_vis = col_d1.date_input("Visualizar Período de:", date.today().replace(day=1))
@@ -459,12 +318,8 @@ with menu[0]:
                     aloc_act = df_alocacoes[(df_alocacoes['tst'] == tst_nome) & (df_alocacoes['data_inicio'] <= data_curr_str) & (df_alocacoes['data_fim'] >= data_curr_str)]
                     if not aloc_act.empty:
                         is_sub = aloc_act['is_substituicao'].iloc[0]
-                        if is_sub == 1:
-                            cell_class = "cell-substitution"
-                            cell_text = "S"
-                        else:
-                            cell_class = "cell-allocated"
-                            cell_text = "X"
+                        cell_class = "cell-substitution" if is_sub == 1 else "cell-allocated"
+                        cell_text = "S" if is_sub == 1 else "X"
                             
                 html_lines.append(f'<td class="{cell_class}">{cell_text}</td>')
             html_lines.append('</tr>')
@@ -485,14 +340,15 @@ with menu[0]:
     st.markdown("---")
     st.markdown("### ✏️ Gerenciar e Excluir Alocações Existentes")
     if not df_alocacoes.empty:
-        for index, row in df_alocacoes.iterrows():
+        for idx_row, row in df_alocacoes.iterrows():
             col_a1, col_a2, col_a3, col_a4, col_a5 = st.columns([3, 3, 3, 3, 1])
             col_a1.write(f"**Projeto:** {row['projeto']}")
             col_a2.write(f"**TST:** {row['tst']}")
             col_a3.write(f"**Veículo:** {row['veiculo']} | **Etilômetro:** {row['etilometro']}")
             col_a4.write(f"**Período:** {row['data_inicio']} até {row['data_fim']}")
-            if col_a5.button("🗑️", key=f"del_aloc_{row['id']}"):
-                execute_db("DELETE FROM alocacoes WHERE id = ?", (row['id'],))
+            if col_a5.button("🗑️", key=f"del_aloc_{idx_row}"):
+                df_alocacoes = df_alocacoes.drop(idx_row).reset_index(drop=True)
+                salvar_tabela("alocacoes", df_alocacoes)
                 st.success("Alocação excluída!")
                 st.rerun()
     else:
@@ -517,11 +373,20 @@ with menu[1]:
         btn_alocar = st.form_submit_button("Salvar Alocação")
         
         if btn_alocar:
-            execute_db(
-                "INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao) VALUES (?,?,?,?,?,?,?,?)",
-                (projeto_sel, tst_sel, veiculo_sel, etilometro_sel, str(dt_inicio), str(dt_fim), 1 if is_sub else 0, obs)
-            )
-            st.success("Alocação registrada e cópia de segurança atualizada!")
+            nova_aloc = pd.DataFrame([{
+                "id": int(datetime.now().timestamp()),
+                "projeto": projeto_sel,
+                "tst": tst_sel,
+                "veiculo": veiculo_sel,
+                "etilometro": etilometro_sel,
+                "data_inicio": str(dt_inicio),
+                "data_fim": str(dt_fim),
+                "is_substituicao": 1 if is_sub else 0,
+                "observacao": obs
+            }])
+            df_alocacoes = pd.concat([df_alocacoes, nova_aloc], ignore_index=True)
+            salvar_tabela("alocacoes", df_alocacoes)
+            st.success("Alocação gravada permanentemente!")
             st.rerun()
 
 # TAB 3: GESTÃO DE FÉRIAS
@@ -542,20 +407,34 @@ with menu[2]:
             elif tst_sub != "Nenhum" and not verificar_disponibilidade_tst(tst_sub, str(f_inicio), str(f_fim)):
                 st.error(f"❌ **TST Não Disponível!** O substituto **{tst_sub}** possui outros compromissos no período de **{f_inicio.strftime('%d/%m/%Y')}** a **{f_fim.strftime('%d/%m/%Y')}**.")
             else:
-                execute_db(
-                    "INSERT INTO ferias (tst, substituto, data_inicio, data_fim) VALUES (?,?,?,?)",
-                    (tst_ferias, tst_sub, str(f_inicio), str(f_fim))
-                )
+                nova_f = pd.DataFrame([{
+                    "id": int(datetime.now().timestamp()),
+                    "tst": tst_ferias,
+                    "substituto": tst_sub,
+                    "data_inicio": str(f_inicio),
+                    "data_fim": str(f_fim)
+                }])
+                df_ferias = pd.concat([df_ferias, nova_f], ignore_index=True)
+                salvar_tabela("ferias", df_ferias)
                 
                 if tst_sub != "Nenhum":
                     aloc_titular = df_alocacoes[df_alocacoes['tst'] == tst_ferias] if not df_alocacoes.empty else pd.DataFrame()
                     projeto_cobertura = aloc_titular['projeto'].iloc[-1] if not aloc_titular.empty else "Cobertura de Férias"
                     
-                    execute_db(
-                        "INSERT INTO alocacoes (projeto, tst, veiculo, etilometro, data_inicio, data_fim, is_substituicao, observacao) VALUES (?,?,?,?,?,?,?,?)",
-                        (projeto_cobertura, tst_sub, "Nenhum", "Nenhum", str(f_inicio), str(f_fim), 1, f"Cobertura de férias de {tst_ferias}")
-                    )
-                    st.success(f"✅ Férias registradas! O TST **{tst_sub}** foi alocado em amarelo (S) para cobrir o projeto **{projeto_cobertura}**.")
+                    nova_sub_aloc = pd.DataFrame([{
+                        "id": int(datetime.now().timestamp()) + 1,
+                        "projeto": projeto_cobertura,
+                        "tst": tst_sub,
+                        "veiculo": "Nenhum",
+                        "etilometro": "Nenhum",
+                        "data_inicio": str(f_inicio),
+                        "data_fim": str(f_fim),
+                        "is_substituicao": 1,
+                        "observacao": f"Cobertura de férias de {tst_ferias}"
+                    }])
+                    df_alocacoes = pd.concat([df_alocacoes, nova_sub_aloc], ignore_index=True)
+                    salvar_tabela("alocacoes", df_alocacoes)
+                    st.success(f"✅ Férias registradas! O TST **{tst_sub}** foi alocado em amarelo (S) no projeto **{projeto_cobertura}**.")
                 else:
                     st.success("✅ Férias registradas com sucesso!")
                 st.rerun()
@@ -563,139 +442,111 @@ with menu[2]:
     st.markdown("---")
     st.markdown("### ✏️ Gerenciar e Excluir Registros de Férias")
     if not df_ferias.empty:
-        for index, row in df_ferias.iterrows():
+        for idx_f, row in df_ferias.iterrows():
             col_f1, col_f2, col_f3, col_f4 = st.columns([4, 4, 3, 1])
             col_f1.write(f"**TST em Férias:** {row['tst']}")
             col_f2.write(f"**Substituto:** {row['substituto']}")
             col_f3.write(f"**Período:** {row['data_inicio']} até {row['data_fim']}")
-            if col_f4.button("🗑️", key=f"del_ferias_{row['id']}"):
-                execute_db("DELETE FROM ferias WHERE id = ?", (row['id'],))
-                if row['substituto'] and row['substituto'] != "Nenhum":
-                    execute_db("DELETE FROM alocacoes WHERE tst = ? AND is_substituicao = 1 AND data_inicio = ? AND data_fim = ?", (row['substituto'], row['data_inicio'], row['data_fim']))
-                st.success("Registro de férias e substituição excluídos!")
+            if col_f4.button("🗑️", key=f"del_ferias_{idx_f}"):
+                sub_nome = row['substituto']
+                d_ini = row['data_inicio']
+                d_fim = row['data_fim']
+                
+                df_ferias = df_ferias.drop(idx_f).reset_index(drop=True)
+                salvar_tabela("ferias", df_ferias)
+                
+                if sub_nome != "Nenhum" and not df_alocacoes.empty:
+                    df_alocacoes = df_alocacoes[~(
+                        (df_alocacoes['tst'] == sub_nome) & 
+                        (df_alocacoes['is_substituicao'] == 1) & 
+                        (df_alocacoes['data_inicio'] == d_ini) & 
+                        (df_alocacoes['data_fim'] == d_fim)
+                    )].reset_index(drop=True)
+                    salvar_tabela("alocacoes", df_alocacoes)
+                    
+                st.success("Férias e substituição removidas!")
                 st.rerun()
 
 # TAB 4: CADASTROS BASE DE RECURSOS
 with menu[3]:
     st.subheader("⚙️ Cadastros de Recursos e Projetos")
-    
     tab_cad1, tab_cad2, tab_cad3, tab_cad4 = st.tabs(["Projetos", "TSTs", "Veículos", "Etilômetros"])
     
     with tab_cad1:
         st.write("#### Cadastrar Novo Projeto")
-        with st.form("form_add_projeto"):
-            novo_proj = st.text_input("Nome do Projeto (Ex: Vale Norte - 6000)")
+        with st.form("form_add_p"):
+            novo_proj = st.text_input("Nome do Projeto")
             if st.form_submit_button("Adicionar Projeto") and novo_proj:
-                try:
-                    execute_db("INSERT INTO projetos (nome) VALUES (?)", (novo_proj,))
-                    st.success(f"Projeto '{novo_proj}' adicionado com sucesso!")
+                if novo_proj not in df_projetos:
+                    df_projetos_tbl = pd.concat([df_projetos_tbl, pd.DataFrame([{"nome": novo_proj}])], ignore_index=True)
+                    salvar_tabela("projetos", df_projetos_tbl)
+                    st.success("Projeto cadastrado!")
                     st.rerun()
-                except:
-                    st.error("Projeto já cadastrado ou erro na gravação.")
-        st.write("##### Projetos Existentes:")
-        df_p_full = run_query("SELECT id, nome FROM projetos")
-        for idx, r in df_p_full.iterrows():
+        for idx_p, r in df_projetos_tbl.iterrows():
             c1, c2 = st.columns([5, 1])
             c1.write(r['nome'])
-            if c2.button("🗑️", key=f"del_p_{r['id']}"):
-                execute_db("DELETE FROM projetos WHERE id = ?", (r['id'],))
+            if c2.button("🗑️", key=f"del_p_{idx_p}"):
+                df_projetos_tbl = df_projetos_tbl.drop(idx_p).reset_index(drop=True)
+                salvar_tabela("projetos", df_projetos_tbl)
                 st.rerun()
 
     with tab_cad2:
         st.write("#### Cadastrar Novo TST")
-        with st.form("form_add_tst"):
+        with st.form("form_add_t"):
             novo_tst = st.text_input("Nome Completo do TST")
             if st.form_submit_button("Adicionar TST") and novo_tst:
-                try:
-                    execute_db("INSERT INTO tsts (nome) VALUES (?)", (novo_tst,))
-                    st.success(f"TST '{novo_tst}' adicionado com sucesso!")
+                if novo_tst not in df_tsts:
+                    df_tsts_tbl = pd.concat([df_tsts_tbl, pd.DataFrame([{"nome": novo_tst}])], ignore_index=True)
+                    salvar_tabela("tsts", df_tsts_tbl)
+                    st.success("TST cadastrado!")
                     st.rerun()
-                except:
-                    st.error("TST já cadastrado ou erro na gravação.")
-        st.write("##### TSTs Existentes:")
-        df_t_full = run_query("SELECT id, nome FROM tsts")
-        for idx, r in df_t_full.iterrows():
+        for idx_t, r in df_tsts_tbl.iterrows():
             c1, c2 = st.columns([5, 1])
             c1.write(r['nome'])
-            if c2.button("🗑️", key=f"del_t_{r['id']}"):
-                execute_db("DELETE FROM tsts WHERE id = ?", (r['id'],))
+            if c2.button("🗑️", key=f"del_t_{idx_t}"):
+                df_tsts_tbl = df_tsts_tbl.drop(idx_t).reset_index(drop=True)
+                salvar_tabela("tsts", df_tsts_tbl)
                 st.rerun()
 
     with tab_cad3:
         st.write("#### Cadastrar Novo Veículo")
-        with st.form("form_add_veiculo"):
+        with st.form("form_add_v"):
             nova_placa = st.text_input("Placa do Veículo")
             if st.form_submit_button("Adicionar Veículo") and nova_placa:
-                try:
-                    execute_db("INSERT INTO veiculos (placa) VALUES (?)", (nova_placa.upper(),))
-                    st.success(f"Veículo '{nova_placa.upper()}' adicionado com sucesso!")
+                if nova_placa.upper() not in df_veiculos:
+                    df_veiculos_tbl = pd.concat([df_veiculos_tbl, pd.DataFrame([{"placa": nova_placa.upper()}])], ignore_index=True)
+                    salvar_tabela("veiculos", df_veiculos_tbl)
+                    st.success("Veículo cadastrado!")
                     st.rerun()
-                except:
-                    st.error("Veículo já cadastrado ou erro na gravação.")
-        st.write("##### Veículos Existentes:")
-        df_v_full = run_query("SELECT id, placa FROM veiculos")
-        for idx, r in df_v_full.iterrows():
+        for idx_v, r in df_veiculos_tbl.iterrows():
             c1, c2 = st.columns([5, 1])
             c1.write(r['placa'])
-            if c2.button("🗑️", key=f"del_v_{r['id']}"):
-                execute_db("DELETE FROM veiculos WHERE id = ?", (r['id'],))
+            if c2.button("🗑️", key=f"del_v_{idx_v}"):
+                df_veiculos_tbl = df_veiculos_tbl.drop(idx_v).reset_index(drop=True)
+                salvar_tabela("veiculos", df_veiculos_tbl)
                 st.rerun()
 
     with tab_cad4:
         st.write("#### Cadastrar Novo Etilômetro")
-        with st.form("form_add_etilometro"):
-            novo_eti = st.text_input("Código/Número do Etilômetro")
+        with st.form("form_add_e"):
+            novo_eti = st.text_input("Código do Etilômetro")
             if st.form_submit_button("Adicionar Etilômetro") and novo_eti:
-                try:
-                    execute_db("INSERT INTO etilometros (codigo) VALUES (?)", (novo_eti,))
-                    st.success(f"Etilômetro '{novo_eti}' adicionado com sucesso!")
+                if novo_eti not in df_etilometros:
+                    df_etilometros_tbl = pd.concat([df_etilometros_tbl, pd.DataFrame([{"codigo": novo_eti}])], ignore_index=True)
+                    salvar_tabela("etilometros", df_etilometros_tbl)
+                    st.success("Etilômetro cadastrado!")
                     st.rerun()
-                except:
-                    st.error("Etilômetro já cadastrado ou erro na gravação.")
-        st.write("##### Etilômetros Existentes:")
-        df_e_full = run_query("SELECT id, codigo FROM etilometros")
-        for idx, r in df_e_full.iterrows():
+        for idx_e, r in df_etilometros_tbl.iterrows():
             c1, c2 = st.columns([5, 1])
             c1.write(r['codigo'])
-            if c2.button("🗑️", key=f"del_e_{r['id']}"):
-                execute_db("DELETE FROM etilometros WHERE id = ?", (r['id'],))
+            if c2.button("🗑️", key=f"del_e_{idx_e}"):
+                df_etilometros_tbl = df_etilometros_tbl.drop(idx_e).reset_index(drop=True)
+                salvar_tabela("etilometros", df_etilometros_tbl)
                 st.rerun()
 
-# TAB 5: BACKUP E RESTAURO
+# TAB 5: POWER BI
 with menu[4]:
-    st.subheader("💾 Cópia de Segurança e Persistência de Dados")
-    st.write("Todas as alterações realizadas no painel são salvas automaticamente em backup JSON.")
-    
-    col_b1, col_b2 = st.columns(2)
-    with col_b1:
-        st.markdown("#### Descarregar Cópia de Segurança")
-        st.write("Faça o descarregamento do ficheiro JSON atual com todos os registos (alocações, férias e cadastros).")
-        conteudo_bkp = gerar_backup_json()
-        st.download_button(
-            label="📥 Descarregar backup_dados.json",
-            data=conteudo_bkp,
-            file_name=f"chammas_backup_{date.today()}.json",
-            mime="application/json"
-        )
-        
-    with col_b2:
-        st.markdown("#### Restaurar Base de Dados")
-        st.write("Caso a aplicação reinicie ou pretenda restaurar dados anteriores, carregue o ficheiro de backup:")
-        arquivo_upload = st.file_uploader("Selecione o ficheiro de cópia de segurança (.json)", type=["json"])
-        if arquivo_upload is not None:
-            if st.button("Restaurar Dados Agora"):
-                sucesso = restaurar_backup_json(arquivo_upload.read().decode('utf-8'))
-                if sucesso:
-                    st.success("✅ Base de dados restaurada com sucesso!")
-                    st.rerun()
-                else:
-                    st.error("❌ Erro ao restaurar os dados do ficheiro.")
-
-# TAB 6: POWER BI
-with menu[5]:
     st.subheader("Exportação de Dados para Power BI")
-    st.write("Baixe o arquivo CSV da tabela fato para conectar no seu relatório do Power BI.")
-    
     if not df_alocacoes.empty:
         csv = df_alocacoes.to_csv(index=False).encode('utf-8')
         st.download_button(
